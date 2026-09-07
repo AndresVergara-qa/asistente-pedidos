@@ -17,7 +17,7 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Obtiene la clave de forma segura desde los Secrets de Streamlit Cloud
+# Obtiene la clave directamente desde Secrets (Oculto del front)
 DEFAULT_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # --- ENCABEZADO ---
@@ -35,7 +35,6 @@ def load_price_memory():
     """Carga los precios guardados desde Google Sheets."""
     try:
         conn = get_gsheets_connection()
-        # ttl=0 desactiva la caché local para obtener siempre la última versión
         df = conn.read(ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Cliente", "SKU", "Producto", "Precio", "Fecha"])
@@ -100,14 +99,7 @@ def clean_val(val):
     return val_str
 
 
-# --- BARRA LATERAL (CONFIGURACIÓN) ---
-st.sidebar.header("Configuración")
-api_key = st.sidebar.text_input(
-    "Gemini API Key", 
-    value=DEFAULT_API_KEY,
-    type="password"
-)
-
+# --- BARRA LATERAL (DATOS Y ARCHIVOS) ---
 st.sidebar.header("Datos del Pedido")
 cliente_actual = st.sidebar.text_input(
     "Nombre del Cliente",
@@ -168,15 +160,15 @@ with tab2:
 
 # --- PROCESAMIENTO ---
 if st.button("🚀 Procesar Pedido", type="primary"):
-    if not api_key:
-        st.error("⚠️ Falta la clave API de Gemini. Configúrala en los Secrets de Streamlit Cloud o ingresala en la barra lateral.")
+    if not DEFAULT_API_KEY:
+        st.error("⚠️ Falta configurar la clave GEMINI_API_KEY en los Secrets de Streamlit Cloud.")
     elif qb_df is None:
         st.error("⚠️ Debes cargar el Catálogo de QuickBooks.")
     elif not uploaded_image and not pasted_text.strip():
         st.error("⚠️ Debes subir una imagen o pegar el texto del pedido.")
     else:
         try:
-            genai.configure(api_key=api_key.strip())
+            genai.configure(api_key=DEFAULT_API_KEY.strip())
 
             # Preparar catálogos
             cols_upper = {str(c).strip().upper(): c for c in qb_df.columns}
