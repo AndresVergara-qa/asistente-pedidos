@@ -16,7 +16,9 @@ st.set_page_config(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_API_KEY = "AQ.Ab8RN6I-OhQOOKd_obfy2FvCpiYglxgU0M9ChtzWe8V0TPJFlQ"
+
+# Obtiene la clave de forma segura desde los Secrets de Streamlit Cloud
+DEFAULT_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # --- ENCABEZADO ---
 st.markdown("<h2 style='text-align: center; color: #7B2CBF; font-weight: bold;'>Convenient Distributor</h2>", unsafe_allow_html=True)
@@ -33,7 +35,7 @@ def load_price_memory():
     """Carga los precios guardados desde Google Sheets."""
     try:
         conn = get_gsheets_connection()
-        # ttl=0 desactiva la caché local para obtener siempre los precios actualizados
+        # ttl=0 desactiva la caché local para obtener siempre la última versión
         df = conn.read(ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Cliente", "SKU", "Producto", "Precio", "Fecha"])
@@ -56,7 +58,6 @@ def save_price_memory(cliente_nombre, df_editado):
             rate = 0.0
 
         if rate > 0 and (sku or producto):
-            # Eliminar registros previos del mismo cliente y producto/SKU
             mask = (memory_df["Cliente"].astype(str).str.strip().str.upper() == cliente_nombre.strip().upper()) & (
                 (memory_df["Producto"].astype(str).str.strip().str.upper() == producto.upper()) | 
                 ((memory_df["SKU"].astype(str).str.strip() != "") & (memory_df["SKU"].astype(str).str.strip() == sku))
@@ -168,7 +169,7 @@ with tab2:
 # --- PROCESAMIENTO ---
 if st.button("🚀 Procesar Pedido", type="primary"):
     if not api_key:
-        st.error("⚠️ Falta la clave API de Gemini.")
+        st.error("⚠️ Falta la clave API de Gemini. Configúrala en los Secrets de Streamlit Cloud o ingresala en la barra lateral.")
     elif qb_df is None:
         st.error("⚠️ Debes cargar el Catálogo de QuickBooks.")
     elif not uploaded_image and not pasted_text.strip():
