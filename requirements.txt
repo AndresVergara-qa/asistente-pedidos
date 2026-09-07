@@ -1,0 +1,6 @@
+streamlit
+pandas
+openpyxl
+google-generativeai
+Pillow
+st-gsheets-connection
