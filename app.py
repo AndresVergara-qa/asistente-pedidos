@@ -325,7 +325,8 @@ with tab_ventas:
 
         st.divider()
         st.subheader("📋 LISTO PARA QUICKBOOKS")
-        st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pégalo directamente en tu factura de QuickBooks.")
+        st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pega haciendo clic en la primera celda de QuickBooks.")
+        
         tsv_lines = []
         for _, row in edited_df.iterrows():
             p = str(row["Product/service"]).replace("\t", " ").strip()
@@ -333,10 +334,12 @@ with tab_ventas:
             d = str(row["Description"]).replace("\t", " ").strip() if row["Description"] else ""
             q = str(row["Qty"])
             r = str(row["Rate"])
-            tsv_lines.append(f"\t{p}\t{s}\t{d}\t{q}\t{r}")
+            # NOTA: Eliminada la tabulación inicial (\t) que desplazaba la columna a la derecha
+            tsv_lines.append(f"{p}\t{s}\t{d}\t{q}\t{r}")
 
         clean_tsv_text = "\n".join(tsv_lines)
         st.code(clean_tsv_text, language="text")
+
 
 # ==========================================
 # PESTAÑA 2: COMPRAS
@@ -452,14 +455,17 @@ with tab_compras:
             except Exception as e:
                 st.error(f"❌ Error al procesar la factura: {e}")
 
-    # Mostrar resultados a ancho completo
+    # Mostrar resultados
     if "res_compras" in st.session_state:
         st.divider()
         st.success("¡Factura procesada con éxito!")
 
-        # Botón desplegable abrir/cerrar factura original
+        # UX MEJORADA: Botón desplegable abre la factura contenida en una columna (estilo sidebar) para no ocupar toda la pantalla.
         with st.expander("👁️ Abrir / Cerrar Imagen de Factura Original", expanded=False):
-            st.image(uploaded_bill, use_container_width=True)
+            # Limitamos el ancho usando columnas para simular un panel
+            img_col, space_col = st.columns([1, 1])
+            with img_col:
+                st.image(uploaded_bill, use_container_width=True)
 
         st.subheader("🔍 Verificación y Edición de Compras (Bills)")
         st.info("💡 **Revisión:** Modifica los valores en la tabla si necesitas ajustar algún dato antes de copiar.")
@@ -475,7 +481,7 @@ with tab_compras:
 
         st.divider()
         st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
-        st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pégalo directamente en QuickBooks:")
+        st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pega haciendo clic en la primera celda de QuickBooks.")
 
         tsv_lines_compras = []
         for _, row in edited_compras_df.iterrows():
@@ -484,7 +490,8 @@ with tab_compras:
             d = str(row["Description"]).replace("\t", " ").strip() if row["Description"] else ""
             q = str(row["Qty"])
             c = str(row["Cost"])
-            tsv_lines_compras.append(f"\t{p}\t{s}\t{d}\t{q}\t{c}")
+            # NOTA: Eliminada la tabulación inicial (\t) que desplazaba la columna a la derecha
+            tsv_lines_compras.append(f"{p}\t{s}\t{d}\t{q}\t{c}")
 
         clean_tsv_text_compras = "\n".join(tsv_lines_compras)
         st.code(clean_tsv_text_compras, language="text")
