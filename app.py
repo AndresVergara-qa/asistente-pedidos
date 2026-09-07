@@ -149,7 +149,7 @@ elif local_found:
 tab_ventas, tab_compras = st.tabs(["🛒 Procesar Pedidos (Ventas)", "📦 Ingreso de Facturas (Compras)"])
 
 # ==========================================
-# PESTAÑA 1: VENTAS (CÓDIGO DE VENTAS)
+# PESTAÑA 1: VENTAS
 # ==========================================
 with tab_ventas:
     st.markdown("### Ingresa el detalle del pedido")
@@ -339,7 +339,7 @@ with tab_ventas:
         st.code(clean_tsv_text, language="text")
 
 # ==========================================
-# PESTAÑA 2: COMPRAS (CON CAJA DE COPIA)
+# PESTAÑA 2: COMPRAS
 # ==========================================
 with tab_compras:
     st.markdown("### Extraer datos de Facturas de Proveedores (Bills)")
@@ -362,17 +362,18 @@ with tab_compras:
                 cols_upper = {str(c).strip().upper(): c for c in qb_df.columns}
                 prod_col = next((cols_upper[k] for k in ["PRODUCT/SERVICE", "NAME", "PRODUCT/SERVICE NAME", "PRODUCT"] if k in cols_upper), qb_df.columns[0])
                 sku_col = next((cols_upper[k] for k in ["SKU", "ITEM SKU"] if k in cols_upper), None)
+                desc_col = next((cols_upper[k] for k in ["DESCRIPTION", "SALES DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION", "PURCHASE DESCRIPTION"] if k in cols_upper), None)
                 
-                cols_qb_compras = [c for c in [prod_col, sku_col] if c is not None]
+                cols_qb_compras = [c for c in [prod_col, sku_col, desc_col] if c is not None]
                 catalog_compras_csv = qb_df[cols_qb_compras].dropna(subset=[prod_col]).to_csv(index=False)
                 
                 prompt_compras = f"""
-                Eres un experto analizando facturas de compras (Bills) de proveedores.
+                Eres un experto analizando facturas de compras (Bills) de proveedores para 'Convenient Distributor'.
                 
                 TAREAS:
                 1. Analiza la imagen de la factura adjunta. Extrae las líneas de los productos reales.
-                2. IGNORA strictly: Taxes, Cupones, Cobros por envíos (Freight), depósitos y Pallets (Ej. CHEP PALLETS).
-                3. Por cada línea válida, identifica: Cantidad, Costo Unitario, Costo Total y la Descripción original del proveedor.
+                2. IGNORA estrictamente: Taxes, Cupones, Cobros por envíos (Freight), depósitos y Pallets (Ej. CHEP PALLETS).
+                3. Por cada línea válida, identifica: Cantidad, Costo Unitario (Cost) y la Descripción original del proveedor.
                 4. Usa el UPC, SKU o la descripción de la factura para encontrar la mejor coincidencia exacta dentro de nuestro Catálogo de QuickBooks.
                 
                 CATÁLOGO DE QUICKBOOKS:
@@ -381,14 +382,13 @@ with tab_compras:
                 FORMATO DE SALIDA (JSON ESTRICTO):
                 [
                     {{
-                        "Product/service": "Nombre exacto encontrado en el catálogo",
-                        "Original_Description": "Lo que dice la factura",
-                        "Qty": 10,
-                        "Unit Cost": 15.50,
-                        "Total Amount": 155.00
+                        "producto_qb": "Nombre exacto encontrado en el catálogo",
+                        "original_description": "Lo que dice la factura original",
+                        "qty": 10,
+                        "cost": 15.50
                     }}
                 ]
-                Solo devuelve el JSON puro, sin comillas triples invertidas ni texto adicional.
+                Solo devuelve el JSON puro, sin comillas triples ni texto adicional.
                 """
                 
                 image_parts = [Image.open(uploaded_bill)]
@@ -421,48 +421,73 @@ with tab_compras:
                     raw_text_compras = response_compras.text.strip()
                     raw_text_compras = re.sub(r"^```(?:json)?", "", raw_text_compras, flags=re.IGNORECASE).strip()
                     raw_text_compras = re.sub(r"```$", "", raw_text_compras).strip()
-                    
                     datos_compras = json.loads(raw_text_compras)
-                    df_compras = pd.DataFrame(datos_compras)
-                    st.session_state["res_compras"] = df_compras
+
+                    # Cruzamos con catálogo en Python para extraer exacto el SKU y Descripción
+                    results_compras = []
+                    for item in datos_compras:
+                        p_name = str(item.get("producto_qb", "")).strip()
+                        cost_val = float(item.get("cost", 0.0))
+                        qty_val = item.get("qty", 1)
+                        orig_desc = str(item.get("original_description", "")).strip()
+
+                        match_row = qb_df[qb_df[prod_col].astype(str).str.strip().str.upper() == p_name.upper()]
+                        if match_row.empty:
+                            match_row = qb_df[qb_df[prod_col].astype(str).str.strip().str.upper().str.contains(p_name.upper(), regex=False, na=False)]
+
+                        actual_pname = match_row.iloc[0][prod_col] if not match_row.empty else p_name
+                        sku_val = clean_val(match_row.iloc[0][sku_col]) if not match_row.empty and sku_col else ""
+                        desc_val = orig_desc if orig_desc else (clean_val(match_row.iloc[0][desc_col]) if not match_row.empty and desc_col else "")
+
+                        results_compras.append({
+                            "Product/service": actual_pname,
+                            "SKU": sku_val,
+                            "Description": desc_val,
+                            "Qty": qty_val,
+                            "Cost": cost_val
+                        })
+
+                    st.session_state["res_compras"] = pd.DataFrame(results_compras)
 
             except Exception as e:
                 st.error(f"❌ Error al procesar la factura: {e}")
 
-    # Mostrar resultados de compras con la caja de copia para QuickBooks
+    # Mostrar resultados a ancho completo
     if "res_compras" in st.session_state:
         st.divider()
         st.success("¡Factura procesada con éxito!")
-        
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.image(uploaded_bill, caption="Factura Original", use_container_width=True)
-            
-        with col2:
-            st.write("### Tabla de Revisión (Bills)")
-            st.info("💡 Modifica las celdas si deseas hacer algún ajuste manual antes de copiar.")
-            
-            edited_compras_df = st.data_editor(
-                st.session_state["res_compras"],
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            st.divider()
-            st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
-            st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pégalo directamente en QuickBooks:")
-            
-            tsv_lines_compras = []
-            for _, row in edited_compras_df.iterrows():
-                p = str(row.get("Product/service", "")).replace("\t", " ").strip()
-                d = str(row.get("Original_Description", "")).replace("\t", " ").strip()
-                q = str(row.get("Qty", ""))
-                c = str(row.get("Unit Cost", ""))
-                a = str(row.get("Total Amount", ""))
-                tsv_lines_compras.append(f"\t{p}\t{d}\t{q}\t{c}\t{a}")
 
-            clean_tsv_text_compras = "\n".join(tsv_lines_compras)
-            st.code(clean_tsv_text_compras, language="text")
+        # Botón desplegable abrir/cerrar factura original
+        with st.expander("👁️ Abrir / Cerrar Imagen de Factura Original", expanded=False):
+            st.image(uploaded_bill, use_container_width=True)
+
+        st.subheader("🔍 Verificación y Edición de Compras (Bills)")
+        st.info("💡 **Revisión:** Modifica los valores en la tabla si necesitas ajustar algún dato antes de copiar.")
+
+        edited_compras_df = st.data_editor(
+            st.session_state["res_compras"],
+            column_config={
+                "Cost": st.column_config.NumberColumn("Cost ($)", format="$%.2f", min_value=0.0)
+            },
+            width="stretch",
+            hide_index=True
+        )
+
+        st.divider()
+        st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
+        st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pégalo directamente en QuickBooks:")
+
+        tsv_lines_compras = []
+        for _, row in edited_compras_df.iterrows():
+            p = str(row["Product/service"]).replace("\t", " ").strip()
+            s = str(row["SKU"]).replace("\t", " ").strip() if row["SKU"] else ""
+            d = str(row["Description"]).replace("\t", " ").strip() if row["Description"] else ""
+            q = str(row["Qty"])
+            c = str(row["Cost"])
+            tsv_lines_compras.append(f"\t{p}\t{s}\t{d}\t{q}\t{c}")
+
+        clean_tsv_text_compras = "\n".join(tsv_lines_compras)
+        st.code(clean_tsv_text_compras, language="text")
 
 # --- PIE DE PÁGINA ---
 st.markdown("<br><br>", unsafe_allow_html=True)
