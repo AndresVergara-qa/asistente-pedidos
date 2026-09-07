@@ -149,7 +149,7 @@ elif local_found:
 tab_ventas, tab_compras = st.tabs(["🛒 Procesar Pedidos (Ventas)", "📦 Ingreso de Facturas (Compras)"])
 
 # ==========================================
-# PESTAÑA 1: VENTAS (TU CÓDIGO ORIGINAL INTACTO)
+# PESTAÑA 1: VENTAS (CÓDIGO DE VENTAS)
 # ==========================================
 with tab_ventas:
     st.markdown("### Ingresa el detalle del pedido")
@@ -233,7 +233,7 @@ with tab_ventas:
                             if 'generateContent' in m.supported_generation_methods:
                                 candidate_models.append(m.name)
                     except Exception:
-                        candidate_models = ["models/gemini-2.5-flash", "models/gemini-1.5-flash"]
+                        candidate_models = ["gemini-1.5-flash", "gemini-2.5-flash"]
 
                     for nombre_modelo in candidate_models:
                         try:
@@ -339,7 +339,7 @@ with tab_ventas:
         st.code(clean_tsv_text, language="text")
 
 # ==========================================
-# PESTAÑA 2: COMPRAS (NUEVO CÓDIGO)
+# PESTAÑA 2: COMPRAS (CORREGIDA)
 # ==========================================
 with tab_compras:
     st.markdown("### Extraer datos de Facturas de Proveedores (Bills)")
@@ -394,9 +394,31 @@ with tab_compras:
                 image_parts = [Image.open(uploaded_bill)]
                 
                 with st.spinner("📦 Analizando factura y cruzando con inventario..."):
-                    model = genai.GenerativeModel("models/gemini-1.5-flash")
-                    response_compras = model.generate_content([prompt_compras] + image_parts)
-                    
+                    # Detección dinámica del modelo para evitar errores de versión API (404)
+                    candidate_models_compras = []
+                    try:
+                        for m in genai.list_models():
+                            if 'generateContent' in m.supported_generation_methods:
+                                candidate_models_compras.append(m.name)
+                    except Exception:
+                        candidate_models_compras = ["gemini-1.5-flash", "gemini-2.5-flash"]
+
+                    response_compras = None
+                    ultimo_error_compra = ""
+                    for nombre_modelo in candidate_models_compras:
+                        try:
+                            model = genai.GenerativeModel(nombre_modelo)
+                            response_compras = model.generate_content([prompt_compras] + image_parts)
+                            if response_compras and response_compras.text:
+                                break
+                        except Exception as err:
+                            ultimo_error_compra = str(err)
+                            continue
+
+                    if response_compras is None:
+                        st.error(f"❌ Error al procesar la factura: {ultimo_error_compra}")
+                        st.stop()
+
                     raw_text_compras = response_compras.text.strip()
                     raw_text_compras = re.sub(r"^```(?:json)?", "", raw_text_compras, flags=re.IGNORECASE).strip()
                     raw_text_compras = re.sub(r"```$", "", raw_text_compras).strip()
@@ -430,5 +452,5 @@ with st.expander("❓ ¿Qué es esto y cómo funciona?"):
     Esta aplicación es un **ayudante de facturación creado para Convenient Distributor**. 
     
     * **🛒 Ventas:** Mapea pedidos de WhatsApp usando el catálogo de QuickBooks y nuestra Memoria Inteligente de Google Sheets.
-    * **📦 Compras:** Lee imágenes de Bills de proveedores, filtra información basura (taxes, pallets) y cruza los productos con QuickBooks de forma automática.
+    * **📦 Compras:** Lee imágenes de Bills de proveedores, filtra información basura y cruza los productos con QuickBooks de forma automática.
     """)
