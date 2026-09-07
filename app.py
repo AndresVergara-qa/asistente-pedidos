@@ -339,7 +339,7 @@ with tab_ventas:
         st.code(clean_tsv_text, language="text")
 
 # ==========================================
-# PESTAÑA 2: COMPRAS (CORREGIDA)
+# PESTAÑA 2: COMPRAS (CON CAJA DE COPIA)
 # ==========================================
 with tab_compras:
     st.markdown("### Extraer datos de Facturas de Proveedores (Bills)")
@@ -371,7 +371,7 @@ with tab_compras:
                 
                 TAREAS:
                 1. Analiza la imagen de la factura adjunta. Extrae las líneas de los productos reales.
-                2. IGNORA estrictamente: Taxes, Cupones, Cobros por envíos (Freight), depósitos y Pallets (Ej. CHEP PALLETS).
+                2. IGNORA strictly: Taxes, Cupones, Cobros por envíos (Freight), depósitos y Pallets (Ej. CHEP PALLETS).
                 3. Por cada línea válida, identifica: Cantidad, Costo Unitario, Costo Total y la Descripción original del proveedor.
                 4. Usa el UPC, SKU o la descripción de la factura para encontrar la mejor coincidencia exacta dentro de nuestro Catálogo de QuickBooks.
                 
@@ -394,7 +394,6 @@ with tab_compras:
                 image_parts = [Image.open(uploaded_bill)]
                 
                 with st.spinner("📦 Analizando factura y cruzando con inventario..."):
-                    # Detección dinámica del modelo para evitar errores de versión API (404)
                     candidate_models_compras = []
                     try:
                         for m in genai.list_models():
@@ -430,7 +429,7 @@ with tab_compras:
             except Exception as e:
                 st.error(f"❌ Error al procesar la factura: {e}")
 
-    # Mostrar resultados de compras
+    # Mostrar resultados de compras con la caja de copia para QuickBooks
     if "res_compras" in st.session_state:
         st.divider()
         st.success("¡Factura procesada con éxito!")
@@ -440,9 +439,30 @@ with tab_compras:
             st.image(uploaded_bill, caption="Factura Original", use_container_width=True)
             
         with col2:
-            st.write("### Tabla Lista para QuickBooks (Bills)")
-            st.caption("Haz clic en el ícono de copiar en la esquina superior derecha de la tabla.")
-            st.dataframe(st.session_state["res_compras"], use_container_width=True)
+            st.write("### Tabla de Revisión (Bills)")
+            st.info("💡 Modifica las celdas si deseas hacer algún ajuste manual antes de copiar.")
+            
+            edited_compras_df = st.data_editor(
+                st.session_state["res_compras"],
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            st.divider()
+            st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
+            st.caption("Haz clic en el icono de copiar (arriba a la derecha de la caja) y pégalo directamente en QuickBooks:")
+            
+            tsv_lines_compras = []
+            for _, row in edited_compras_df.iterrows():
+                p = str(row.get("Product/service", "")).replace("\t", " ").strip()
+                d = str(row.get("Original_Description", "")).replace("\t", " ").strip()
+                q = str(row.get("Qty", ""))
+                c = str(row.get("Unit Cost", ""))
+                a = str(row.get("Total Amount", ""))
+                tsv_lines_compras.append(f"\t{p}\t{d}\t{q}\t{c}\t{a}")
+
+            clean_tsv_text_compras = "\n".join(tsv_lines_compras)
+            st.code(clean_tsv_text_compras, language="text")
 
 # --- PIE DE PÁGINA ---
 st.markdown("<br><br>", unsafe_allow_html=True)
@@ -452,5 +472,5 @@ with st.expander("❓ ¿Qué es esto y cómo funciona?"):
     Esta aplicación es un **ayudante de facturación creado para Convenient Distributor**. 
     
     * **🛒 Ventas:** Mapea pedidos de WhatsApp usando el catálogo de QuickBooks y nuestra Memoria Inteligente de Google Sheets.
-    * **📦 Compras:** Lee imágenes de Bills de proveedores, filtra información basura y cruza los productos con QuickBooks de forma automática.
+    * **📦 Compras:** Lee imágenes de Bills de proveedores, filtra información basura (taxes, pallets) y cruza los productos con QuickBooks de forma automática.
     """)
