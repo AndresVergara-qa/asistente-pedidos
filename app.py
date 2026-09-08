@@ -48,17 +48,24 @@ def _extract_version(name):
 
 def _priority_rank(model_name):
     n = model_name.lower()
-    # Excluir modelos que no sirven para este caso de uso (no son de chat/texto+imagen)
-    if any(bad in n for bad in ["embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm"]):
-        return (999, 2, n)
     version = _extract_version(n)
     is_flash = "flash" in n
     is_pro = "pro" in n
     # Versión más alta primero; entre versiones iguales, flash antes que pro (más rápido)
     return (-version, 0 if is_flash else (1 if is_pro else 2), n)
 
+def _is_usable_model(model_name):
+    n = model_name.lower()
+    # Solo familia Gemini: excluye Gemma (cuota/contexto mucho más chicos, no apto
+    # para catálogos grandes), embeddings, generación de imagen, TTS, etc.
+    if "gemini" not in n:
+        return False
+    if any(bad in n for bad in ["embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm", "vision"]):
+        return False
+    return True
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_model_candidates(_api_key_hash, _v=2):
+def get_model_candidates(_api_key_hash, _v=3):
     """Pregunta a la API qué modelos están disponibles para esta clave y los
     ordena por versión (más alta primero). Si la consulta falla, cae de
     vuelta a alias "-latest" que Google mantiene apuntando al modelo vigente,
@@ -68,6 +75,7 @@ def get_model_candidates(_api_key_hash, _v=2):
             m.name for m in genai.list_models()
             if "generateContent" in getattr(m, "supported_generation_methods", [])
         ]
+        available = [m for m in available if _is_usable_model(m)]
         if available:
             return sorted(available, key=_priority_rank)
     except Exception:
