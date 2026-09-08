@@ -43,7 +43,10 @@ GEMINI_FALLBACK_PRIORITY = [
 
 def _priority_rank(model_name):
     n = model_name.lower()
-    for i, key in enumerate(["2.5-flash", "2.5-pro", "1.5-flash", "1.5-pro", "flash", "pro"]):
+    for i, key in enumerate([
+        "2.5-flash", "2.5-pro", "2.0-flash", "flash-latest",
+        "1.5-flash", "1.5-pro", "pro-latest", "flash", "pro",
+    ]):
         if key in n:
             return i
     return 99
@@ -68,15 +71,24 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
     """
     Intenta los modelos disponibles en orden de prioridad (mejor primero) y
     devuelve (texto_respuesta, nombre_modelo_usado, error).
+    Si ya encontramos un modelo que funciona en esta sesión, lo probamos
+    primero (evita repetir el descubrimiento en cada clic). El número de
+    intentos y el tiempo por intento están acotados para que un modelo lento
+    o con problemas no bloquee la app por varios minutos.
     """
     last_error = ""
+    preferred = st.session_state.get("working_model")
     candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
+    ordered = ([preferred] if preferred else []) + [c for c in candidates if c != preferred]
+    ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
+
     with st.spinner(spinner_text):
-        for model_name in candidates:
+        for i, model_name in enumerate(ordered, start=1):
             try:
                 model = genai.GenerativeModel(model_name)
-                response = model.generate_content(parts)
+                response = model.generate_content(parts, request_options={"timeout": 25})
                 if response and response.text:
+                    st.session_state["working_model"] = model_name
                     return response.text, model_name, None
             except Exception as err:
                 last_error = f"{model_name}: {err}"
