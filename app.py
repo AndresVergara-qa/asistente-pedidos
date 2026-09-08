@@ -178,12 +178,20 @@ def normalize(s):
 # =========================================================
 # MATCHING ROBUSTO — usado por Ventas y Compras
 # =========================================================
-def find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint=""):
+def build_catalog_index(qb_df, prod_col):
+    """Normaliza los nombres del catálogo UNA sola vez por pedido (no por producto).
+    Recalcularlo por cada línea del pedido era el cuello de botella que hacía
+    la app lenta con catálogos grandes (3000+ productos)."""
+    return qb_df[prod_col].astype(str).apply(normalize)
+
+def find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint="", catalog_norm=None):
     """
     Busca la mejor fila del catálogo para un producto extraído por la IA.
     Prioridad: 1) SKU exacto  2) Nombre exacto  3) Nombre aproximado (fuzzy)
     Devuelve (fila_o_None, estado, nombre_alternativo_o_None)
     estado ∈ {"sku", "exacto", "aproximado", "ambiguo", "sin_match"}
+    `catalog_norm` debe venir precalculado con build_catalog_index() para no
+    repetir la normalización de todo el catálogo en cada llamada.
     """
     p_norm = normalize(p_name)
     sku_norm = normalize(sku_hint)
@@ -197,7 +205,8 @@ def find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint=""):
     if not p_norm:
         return None, "sin_match", None
 
-    catalog_norm = qb_df[prod_col].astype(str).apply(normalize)
+    if catalog_norm is None:
+        catalog_norm = build_catalog_index(qb_df, prod_col)
 
     # 2. Coincidencia exacta por nombre
     m = qb_df[catalog_norm == p_norm]
@@ -240,9 +249,9 @@ ESTADO_LABELS = {
     "sin_match": "❌ Sin match",
 }
 
-def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint=""):
+def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalog_norm=None):
     """Envuelve find_best_match y arma los campos finales + etiqueta de estado."""
-    row, status, alt_name = find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint)
+    row, status, alt_name = find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint, catalog_norm=catalog_norm)
 
     if row is not None:
         actual_pname = row[prod_col]
@@ -435,6 +444,7 @@ with tab_ventas:
                         if p_key:
                             prod_prices[p_key] = val_p
 
+                    catalog_norm_idx = build_catalog_index(qb_df, prod_col)
                     results = []
                     for item in items:
                         p_name = str(item.get("producto_qb", "")).strip()
@@ -442,7 +452,8 @@ with tab_ventas:
                         extracted_rate = safe_float(item.get("rate", 0.0))
 
                         actual_pname, sku_val, desc_val, estado = resolve_item(
-                            qb_df, prod_col, sku_col, desc_col, p_name, sku_hint
+                            qb_df, prod_col, sku_col, desc_col, p_name, sku_hint,
+                            catalog_norm=catalog_norm_idx
                         )
 
                         recalled_rate = sku_prices.get(sku_val, 0.0)
@@ -573,6 +584,7 @@ with tab_compras:
                 st.session_state["compras_raw_response"] = raw_text_compras
                 st.session_state["compras_model_used"] = used_model_compras
 
+                catalog_norm_idx_compras = build_catalog_index(qb_df, prod_col)
                 results_compras = []
                 for item in datos_compras:
                     p_name = str(item.get("producto_qb", "")).strip()
@@ -582,7 +594,8 @@ with tab_compras:
                     orig_desc = str(item.get("original_description", "")).strip()
 
                     actual_pname, sku_val, desc_val, estado = resolve_item(
-                        qb_df, prod_col, sku_col, desc_col, p_name, sku_qb
+                        qb_df, prod_col, sku_col, desc_col, p_name, sku_qb,
+                        catalog_norm=catalog_norm_idx_compras
                     )
                     # Preferimos la descripción original de la factura si el catálogo no trae una
                     desc_val = orig_desc if orig_desc else desc_val
