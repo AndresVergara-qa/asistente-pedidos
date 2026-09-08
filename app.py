@@ -539,15 +539,15 @@ with tab_ventas:
             "Si el nombre pegado no coincide 100% con QuickBooks, pegar directo en la columna 'Product/service' puede dejarla en blanco (comportamiento normal de QB)."
         )
 
-        tab_sku, tab_std = st.tabs(["🛠️ Pegar desde SKU (Recomendado)", "📌 Copiado Estándar"])
+        tab_sku, tab_std = st.tabs(["🛠️ Pegar desde SKU (Alternativa)", "📌 Copiado Estándar"])
 
         with tab_sku:
             st.caption("Haz clic en la primera celda de la fila (Product/service) y pega.")
             st.code(tsv_from_df(edited_df, ["SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
 
         with tab_std:
-            st.caption("Haz clic en la celda 'Product/service' y pega.")
-            st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Description", "Qty", "Rate"]), language="text")
+            st.caption("Formato original: pega tal como lo hacías antes.")
+            st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
 
 # =========================================================
 # PESTAÑA 2: COMPRAS
