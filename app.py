@@ -32,30 +32,37 @@ st.markdown("Mapeo inteligente de pedidos y facturas de proveedores con **Inteli
 # (la de compras terminó con el orden invertido y sin el prefijo correcto,
 # usando el modelo más débil primero cuando list_models() fallaba).
 # Ahora hay UNA sola fuente de verdad: se pregunta a la API cuáles modelos
-# están realmente disponibles para esta clave (no todos los nombres "obvios"
-# están habilitados en toda cuenta/versión), y se ordenan por prioridad.
+# están realmente disponibles para esta clave y se ordenan por VERSIÓN
+# (la más alta primero), en vez de nombres fijos que quedan obsoletos cada
+# vez que Google lanza una nueva generación (ya nos pasó con 2.5-pro).
 GEMINI_FALLBACK_PRIORITY = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
+    "gemini-2.0-flash",
     "gemini-1.5-flash",
-    "gemini-1.5-pro",
 ]
+
+def _extract_version(name):
+    m = re.search(r'(\d+(?:\.\d+)?)', name)
+    return float(m.group(1)) if m else 0.0
 
 def _priority_rank(model_name):
     n = model_name.lower()
-    for i, key in enumerate([
-        "2.5-flash", "2.5-pro", "2.0-flash", "flash-latest",
-        "1.5-flash", "1.5-pro", "pro-latest", "flash", "pro",
-    ]):
-        if key in n:
-            return i
-    return 99
+    # Excluir modelos que no sirven para este caso de uso (no son de chat/texto+imagen)
+    if any(bad in n for bad in ["embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm"]):
+        return (999, 2, n)
+    version = _extract_version(n)
+    is_flash = "flash" in n
+    is_pro = "pro" in n
+    # Versión más alta primero; entre versiones iguales, flash antes que pro (más rápido)
+    return (-version, 0 if is_flash else (1 if is_pro else 2), n)
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_model_candidates(_api_key_hash):
+def get_model_candidates(_api_key_hash, _v=2):
     """Pregunta a la API qué modelos están disponibles para esta clave y los
-    ordena poniendo los más capaces/rápidos primero. Si la consulta falla,
-    cae de vuelta a la lista fija como último recurso."""
+    ordena por versión (más alta primero). Si la consulta falla, cae de
+    vuelta a alias "-latest" que Google mantiene apuntando al modelo vigente,
+    en vez de nombres de versión fijos que quedan obsoletos con el tiempo."""
     try:
         available = [
             m.name for m in genai.list_models()
