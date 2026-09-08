@@ -31,29 +31,55 @@ st.markdown("Mapeo inteligente de pedidos y facturas de proveedores con **Inteli
 # Antes esta lista vivía duplicada en cada pestaña y se fue desincronizando
 # (la de compras terminó con el orden invertido y sin el prefijo correcto,
 # usando el modelo más débil primero cuando list_models() fallaba).
-# Ahora hay UNA sola fuente de verdad.
-GEMINI_MODEL_PRIORITY = [
+# Ahora hay UNA sola fuente de verdad: se pregunta a la API cuáles modelos
+# están realmente disponibles para esta clave (no todos los nombres "obvios"
+# están habilitados en toda cuenta/versión), y se ordenan por prioridad.
+GEMINI_FALLBACK_PRIORITY = [
     "gemini-2.5-flash",
     "gemini-2.5-pro",
     "gemini-1.5-flash",
     "gemini-1.5-pro",
 ]
 
+def _priority_rank(model_name):
+    n = model_name.lower()
+    for i, key in enumerate(["2.5-flash", "2.5-pro", "1.5-flash", "1.5-pro", "flash", "pro"]):
+        if key in n:
+            return i
+    return 99
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_model_candidates(_api_key_hash):
+    """Pregunta a la API qué modelos están disponibles para esta clave y los
+    ordena poniendo los más capaces/rápidos primero. Si la consulta falla,
+    cae de vuelta a la lista fija como último recurso."""
+    try:
+        available = [
+            m.name for m in genai.list_models()
+            if "generateContent" in getattr(m, "supported_generation_methods", [])
+        ]
+        if available:
+            return sorted(available, key=_priority_rank)
+    except Exception:
+        pass
+    return GEMINI_FALLBACK_PRIORITY
+
 def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artificial..."):
     """
-    Intenta los modelos en orden de prioridad (mejor primero) y devuelve
-    (texto_respuesta, nombre_modelo_usado, error).
+    Intenta los modelos disponibles en orden de prioridad (mejor primero) y
+    devuelve (texto_respuesta, nombre_modelo_usado, error).
     """
     last_error = ""
+    candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
     with st.spinner(spinner_text):
-        for model_name in GEMINI_MODEL_PRIORITY:
+        for model_name in candidates:
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(parts)
                 if response and response.text:
                     return response.text, model_name, None
             except Exception as err:
-                last_error = str(err)
+                last_error = f"{model_name}: {err}"
                 continue
     return None, None, last_error
 
