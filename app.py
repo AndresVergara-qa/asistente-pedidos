@@ -539,7 +539,7 @@ with tab_ventas:
             "Si el nombre pegado no coincide 100% con QuickBooks, pegar directo en la columna 'Product/service' puede dejarla en blanco (comportamiento normal de QB)."
         )
 
-        tab_sku, tab_std = st.tabs(["🛠️ Pegar desde SKU (Alternativa)", "📌 Copiado Estándar"])
+        tab_sku, tab_std, tab_std_nodesc = st.tabs(["🛠️ Pegar desde SKU (Alternativa)", "📌 Copiado Estándar", "📌 Estándar sin Descripción (Prueba)"])
 
         with tab_sku:
             st.caption("Haz clic en la primera celda de la fila (Product/service) y pega.")
@@ -548,6 +548,10 @@ with tab_ventas:
         with tab_std:
             st.caption("Formato original: pega tal como lo hacías antes.")
             st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
+
+        with tab_std_nodesc:
+            st.caption("Igual al de arriba pero sin la columna Description — prueba esta si el Rate te sigue cayendo en Amount.")
+            st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Qty", "Rate"], leading_blank=True), language="text")
 
 # =========================================================
 # PESTAÑA 2: COMPRAS
@@ -629,8 +633,11 @@ with tab_compras:
                         qb_df, prod_col, sku_col, desc_col, p_name, sku_qb,
                         catalog_norm=catalog_norm_idx_compras
                     )
-                    # Preferimos la descripción original de la factura si el catálogo no trae una
-                    desc_val = orig_desc if orig_desc else desc_val
+                    # La descripción SIEMPRE debe venir del catálogo (inventario).
+                    # El texto de la factura del proveedor solo se usa como último
+                    # recurso, si el catálogo no tiene descripción para ese producto.
+                    if not desc_val:
+                        desc_val = orig_desc
 
                     results_compras.append({
                         "Estado": estado,
