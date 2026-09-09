@@ -348,9 +348,13 @@ if qb_df is not None:
     cols_upper = {str(c).strip().upper(): c for c in qb_df.columns}
     prod_col = next((cols_upper[k] for k in ["PRODUCT/SERVICE", "NAME", "PRODUCT/SERVICE NAME", "PRODUCT"] if k in cols_upper), qb_df.columns[0])
     sku_col = next((cols_upper[k] for k in ["SKU", "ITEM SKU"] if k in cols_upper), None)
-    desc_col = next((cols_upper[k] for k in ["DESCRIPTION", "SALES DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION", "PURCHASE DESCRIPTION"] if k in cols_upper), None)
+    # QuickBooks suele traer columnas de descripción SEPARADAS para Ventas y Compras.
+    # Antes usábamos una sola columna para ambas pestañas, lo que hacía que Compras
+    # mostrara por error la descripción de Ventas (o viceversa).
+    sales_desc_col = next((cols_upper[k] for k in ["SALES DESCRIPTION", "DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION"] if k in cols_upper), None)
+    purchase_desc_col = next((cols_upper[k] for k in ["PURCHASE DESCRIPTION", "PURCHASE DESC", "DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION"] if k in cols_upper), None)
 else:
-    prod_col = sku_col = desc_col = None
+    prod_col = sku_col = sales_desc_col = purchase_desc_col = None
 
 
 def tsv_from_df(df, cols, leading_blank=False):
@@ -392,7 +396,7 @@ with tab_ventas:
             try:
                 genai.configure(api_key=DEFAULT_API_KEY.strip())
 
-                cols_qb = [c for c in [prod_col, sku_col, desc_col] if c is not None]
+                cols_qb = [c for c in [prod_col, sku_col, sales_desc_col] if c is not None]
                 catalog_csv = qb_df[cols_qb].dropna(subset=[prod_col]).to_csv(index=False)
 
                 measures_csv = ""
@@ -481,7 +485,7 @@ with tab_ventas:
                         extracted_rate = safe_float(item.get("rate", 0.0))
 
                         actual_pname, sku_val, desc_val, estado = resolve_item(
-                            qb_df, prod_col, sku_col, desc_col, p_name, sku_hint,
+                            qb_df, prod_col, sku_col, sales_desc_col, p_name, sku_hint,
                             catalog_norm=catalog_norm_idx
                         )
 
@@ -573,7 +577,7 @@ with tab_compras:
             try:
                 genai.configure(api_key=DEFAULT_API_KEY.strip())
 
-                cols_qb_compras = [c for c in [prod_col, sku_col, desc_col] if c is not None]
+                cols_qb_compras = [c for c in [prod_col, sku_col, purchase_desc_col] if c is not None]
                 catalog_compras_csv = qb_df[cols_qb_compras].dropna(subset=[prod_col]).to_csv(index=False)
 
                 prompt_compras = f"""
@@ -630,7 +634,7 @@ with tab_compras:
                     orig_desc = str(item.get("original_description", "")).strip()
 
                     actual_pname, sku_val, desc_val, estado = resolve_item(
-                        qb_df, prod_col, sku_col, desc_col, p_name, sku_qb,
+                        qb_df, prod_col, sku_col, purchase_desc_col, p_name, sku_qb,
                         catalog_norm=catalog_norm_idx_compras
                     )
                     # La descripción SIEMPRE debe venir del catálogo (inventario).
