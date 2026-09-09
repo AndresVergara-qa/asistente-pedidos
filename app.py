@@ -276,14 +276,19 @@ ESTADO_LABELS = {
     "sin_match": "❌ Sin match",
 }
 
-def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalog_norm=None):
-    """Envuelve find_best_match y arma los campos finales + etiqueta de estado."""
+def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalog_norm=None, fallback_desc_col=None):
+    """Envuelve find_best_match y arma los campos finales + etiqueta de estado.
+    Si desc_col no tiene valor para la fila encontrada (ej. falta la Purchase
+    Description en QuickBooks), usa fallback_desc_col — igual que hace QuickBooks
+    internamente cuando falta la descripción de compra."""
     row, status, alt_name = find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint, catalog_norm=catalog_norm)
 
     if row is not None:
         actual_pname = row[prod_col]
         sku_val = clean_val(row[sku_col]) if sku_col else ""
         desc_val = clean_val(row[desc_col]) if desc_col else ""
+        if not desc_val and fallback_desc_col:
+            desc_val = clean_val(row[fallback_desc_col])
     else:
         actual_pname = p_name
         sku_val = sku_hint
@@ -635,11 +640,11 @@ with tab_compras:
 
                     actual_pname, sku_val, desc_val, estado = resolve_item(
                         qb_df, prod_col, sku_col, purchase_desc_col, p_name, sku_qb,
-                        catalog_norm=catalog_norm_idx_compras
+                        catalog_norm=catalog_norm_idx_compras, fallback_desc_col=sales_desc_col
                     )
-                    # La descripción SIEMPRE debe venir del catálogo (inventario).
-                    # El texto de la factura del proveedor solo se usa como último
-                    # recurso, si el catálogo no tiene descripción para ese producto.
+                    # Orden de prioridad para la descripción, igual que QuickBooks:
+                    # 1) Purchase Description  2) Sales Description (si falta la de compra)
+                    # 3) Texto de la factura del proveedor (último recurso, si el catálogo no tiene ninguna)
                     if not desc_val:
                         desc_val = orig_desc
 
