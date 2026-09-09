@@ -542,25 +542,14 @@ with tab_ventas:
         st.divider()
         st.subheader("📋 LISTO PARA QUICKBOOKS")
         st.info(
-            "💡 **Recomendado:** en 'Pegar desde SKU', haz clic en la **primera celda de la fila (Product/service)** "
-            "en QuickBooks — la dejamos vacía a propósito — y pega. SKU, Descripción, Cantidad y Rate caen solos en su columna. "
-            "QuickBooks reconoce el SKU y autocompleta el nombre del producto. "
-            "Si el nombre pegado no coincide 100% con QuickBooks, pegar directo en la columna 'Product/service' puede dejarla en blanco (comportamiento normal de QB)."
+            "💡 Usa **Paste all lines** en QuickBooks y pega este texto tal cual. "
+            "El SKU y la Cantidad/Rate siempre quedan correctos. El **nombre del producto** a veces "
+            "queda en blanco cuando es un sub-item (ej. 'Goya:Producto') — es un comportamiento propio "
+            "de QuickBooks al resolver nombres jerárquicos, no algo que la app pueda forzar. "
+            "Si pasa, el SKU ya está en la fila: solo selecciona el producto del desplegable manualmente "
+            "en esa línea puntual."
         )
-
-        tab_sku, tab_std, tab_std_nodesc = st.tabs(["🛠️ Pegar desde SKU (Alternativa)", "📌 Copiado Estándar", "📌 Estándar sin Descripción (Prueba)"])
-
-        with tab_sku:
-            st.caption("Haz clic en la primera celda de la fila (Product/service) y pega.")
-            st.code(tsv_from_df(edited_df, ["SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
-
-        with tab_std:
-            st.caption("Formato original: pega tal como lo hacías antes.")
-            st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
-
-        with tab_std_nodesc:
-            st.caption("Igual al de arriba pero sin la columna Description — prueba esta si el Rate te sigue cayendo en Amount.")
-            st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Qty", "Rate"], leading_blank=True), language="text")
+        st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
 
 # =========================================================
 # PESTAÑA 2: COMPRAS
@@ -693,20 +682,13 @@ with tab_compras:
         st.divider()
         st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
         st.info(
-            "💡 **Recomendado:** en 'Pegar desde SKU', haz clic en la **primera celda de la fila (Product/service)** "
-            "y pega — la dejamos vacía a propósito. Si el nombre pegado no coincide 100% con QuickBooks, "
-            "pegar directo en la columna 'Product/service' puede dejarla en blanco (comportamiento normal de QB)."
+            "💡 Usa **Paste all lines** en QuickBooks y pega este texto tal cual. "
+            "El SKU y la Cantidad/Cost siempre quedan correctos. El **nombre del producto** a veces "
+            "queda en blanco cuando es un sub-item (ej. 'Goya:Producto') — es comportamiento propio de "
+            "QuickBooks, no algo que la app pueda forzar. Si pasa, el SKU ya está en la fila: solo "
+            "selecciona el producto del desplegable manualmente en esa línea puntual."
         )
-
-        tab_c_sku, tab_c_std = st.tabs(["🛠️ Pegar desde SKU (Recomendado)", "📌 Copiado Estándar"])
-
-        with tab_c_sku:
-            st.caption("Haz clic en la primera celda de la fila (Product/service) y pega.")
-            st.code(tsv_from_df(edited_compras_df, ["SKU", "Description", "Qty", "Cost"], leading_blank=True), language="text")
-
-        with tab_c_std:
-            st.caption("Haz clic en la celda 'Product/service' y pega.")
-            st.code(tsv_from_df(edited_compras_df, ["Product/service", "SKU", "Description", "Qty", "Cost"]), language="text")
+        st.code(tsv_from_df(edited_compras_df, ["Product/service", "SKU", "Description", "Qty", "Cost"], leading_blank=True), language="text")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.divider()
