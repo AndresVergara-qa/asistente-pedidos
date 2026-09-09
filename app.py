@@ -636,7 +636,6 @@ with tab_compras:
                     sku_qb = str(item.get("sku_qb", "")).strip()
                     cost_val = safe_float(item.get("cost", 0.0))
                     qty_val = item.get("qty", 1)
-                    orig_desc = str(item.get("original_description", "")).strip()
 
                     actual_pname, sku_val, desc_val, estado = resolve_item(
                         qb_df, prod_col, sku_col, purchase_desc_col, p_name, sku_qb,
@@ -644,9 +643,9 @@ with tab_compras:
                     )
                     # Orden de prioridad para la descripción, igual que QuickBooks:
                     # 1) Purchase Description  2) Sales Description (si falta la de compra)
-                    # 3) Texto de la factura del proveedor (último recurso, si el catálogo no tiene ninguna)
-                    if not desc_val:
-                        desc_val = orig_desc
+                    # Si ninguna de las dos existe en el catálogo, se deja vacía a propósito
+                    # (no se usa el texto de la factura) para que sea evidente qué productos
+                    # de tu QuickBooks no tienen descripción cargada.
 
                     results_compras.append({
                         "Estado": estado,
