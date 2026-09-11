@@ -364,6 +364,8 @@ if origen_catalogo == "QuickBooks (automático)":
     qb_df = st.session_state.get("qb_catalog_df")
     if qb_df is not None and not qb_df.empty:
         st.sidebar.success(f"✅ Catálogo QB: {len(qb_df)} productos.")
+        with st.sidebar.expander("🐞 Ver productos del catálogo (debug)"):
+            st.dataframe(qb_df, hide_index=True)
 else:
     qb_file = st.sidebar.file_uploader(
         "Catálogo de QuickBooks",
