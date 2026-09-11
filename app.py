@@ -356,7 +356,10 @@ if origen_catalogo == "QuickBooks (automático)":
                 with st.spinner("Descargando catálogo de QuickBooks..."):
                     st.session_state["qb_catalog_df"] = qb_client.fetch_catalog_df()
         except Exception as e:
+            import traceback
             st.sidebar.error(f"Error trayendo catálogo de QuickBooks: {e}")
+            with st.sidebar.expander("🐞 Traceback completo"):
+                st.code(traceback.format_exc())
             st.session_state["qb_catalog_df"] = None
     qb_df = st.session_state.get("qb_catalog_df")
     if qb_df is not None and not qb_df.empty:

@@ -179,6 +179,12 @@ def get_client():
         company_id=tokens["realm_id"],
         minorversion=75,
     )
+    if client.session is None:
+        raise RuntimeError(
+            f"QuickBooks() se creó sin sesión. access_token presente={bool(auth_client.access_token)}, "
+            f"refresh_token presente={bool(auth_client.refresh_token)}, needs_refresh={needs_refresh}, "
+            f"realm_id={tokens['realm_id']!r}"
+        )
     st.session_state["qb_client"] = client
     return client
 
