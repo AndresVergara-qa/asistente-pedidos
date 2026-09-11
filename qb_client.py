@@ -284,6 +284,60 @@ def get_or_create_customer(display_name):
     return result["Customer"]
 
 
+def get_last_price(item_id, customer_id=None, max_results=50):
+    """Busca el precio (UnitPrice) más reciente al que se vendió item_id,
+    revisando Invoices y Sales Receipts (ventas ya facturadas/cobradas, no
+    Estimates). Si customer_id viene dado, solo mira ventas a ese cliente.
+    Devuelve {"rate":, "date":, "doc_type":} o None si no hay historial."""
+    best = None
+    for entity in ("Invoice", "SalesReceipt"):
+        select = f"SELECT * FROM {entity}"
+        if customer_id:
+            select += f" WHERE CustomerRef = '{_escape_sql(customer_id)}'"
+        select += f" ORDERBY TxnDate DESC MAXRESULTS {max_results}"
+        for txn in _query(select).get(entity, []):
+            match_rate = None
+            for line in txn.get("Line", []):
+                detail = line.get("SalesItemLineDetail")
+                if detail and detail.get("ItemRef", {}).get("value") == item_id:
+                    match_rate = detail.get("UnitPrice")
+                    break
+            if match_rate is None:
+                continue
+            date = txn.get("TxnDate", "")
+            if best is None or date > best["date"]:
+                best = {"rate": float(match_rate), "date": date, "doc_type": entity}
+            break  # ya es el más reciente de este tipo de documento (viene ORDERBY DESC)
+    return best
+
+
+def suggest_price(item_id, customer_id=None, diff_threshold_pct=8):
+    """Sugiere un precio para item_id usando el historial real de ventas en
+    QuickBooks. Prioriza el último precio vendido a ESE cliente; si una venta
+    más reciente a OTRO cliente tiene un precio bastante distinto, lo avisa
+    en `note` (puede indicar que cambió el precio de mercado).
+    Devuelve (rate_o_None, note_o_None)."""
+    cust_price = get_last_price(item_id, customer_id=customer_id) if customer_id else None
+    any_price = get_last_price(item_id, customer_id=None)
+
+    if cust_price and any_price:
+        if any_price["date"] > cust_price["date"] and cust_price["rate"] > 0:
+            diff_pct = abs(any_price["rate"] - cust_price["rate"]) / cust_price["rate"] * 100
+            if diff_pct >= diff_threshold_pct:
+                note = (
+                    f"Último precio a este cliente: ${cust_price['rate']:.2f} ({cust_price['date']}). "
+                    f"Venta más reciente a otro cliente: ${any_price['rate']:.2f} ({any_price['date']}) "
+                    f"— {diff_pct:.0f}% de diferencia, revisa si cambió el precio."
+                )
+                return cust_price["rate"], note
+        return cust_price["rate"], None
+    if cust_price:
+        return cust_price["rate"], None
+    if any_price:
+        return any_price["rate"], f"Sin historial con este cliente; se usó el último precio vendido (a otro cliente) el {any_price['date']}."
+    return None, None
+
+
 def get_or_create_vendor(display_name):
     safe_name = _escape_sql(display_name)
     matches = _query(f"SELECT * FROM Vendor WHERE DisplayName = '{safe_name}'").get("Vendor", [])

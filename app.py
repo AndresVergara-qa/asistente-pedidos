@@ -561,6 +561,8 @@ with tab_ventas:
 
                     catalog_norm_idx = build_catalog_index(qb_df, prod_col)
                     results = []
+                    precio_notas = []
+                    precios_pendientes = []  # filas sin precio que aún podríamos consultar en QB
                     for item in items:
                         p_name = str(item.get("producto_qb", "")).strip()
                         sku_hint = str(item.get("sku_hint", "")).strip()
@@ -576,6 +578,7 @@ with tab_ventas:
                             recalled_rate = prod_prices.get(str(actual_pname).upper(), 0.0)
                         final_rate = recalled_rate if recalled_rate > 0.0 else extracted_rate
 
+                        row_idx = len(results)
                         results.append({
                             "Estado": estado,
                             "Product/service": actual_pname,
@@ -584,8 +587,26 @@ with tab_ventas:
                             "Qty": item.get("qty", 1),
                             "Rate": final_rate,
                         })
+                        if final_rate == 0.0 and qb_connected:
+                            precios_pendientes.append((row_idx, actual_pname, sku_val))
+
+                    if precios_pendientes:
+                        with st.spinner(f"Consultando en QuickBooks el último precio vendido de {len(precios_pendientes)} producto(s)..."):
+                            for row_idx, pname, sku_val in precios_pendientes:
+                                try:
+                                    item_id = qb_client._find_item_id(pname, sku_val)
+                                    if not item_id:
+                                        continue
+                                    sugerido, nota = qb_client.suggest_price(item_id, customer_id=customer_id_actual)
+                                    if sugerido:
+                                        results[row_idx]["Rate"] = sugerido
+                                        if nota:
+                                            precio_notas.append(f"**{pname}**: {nota}")
+                                except Exception:
+                                    continue  # si falla la consulta de precio, se deja en 0 para revisión manual
 
                     st.session_state["res_df"] = pd.DataFrame(results)
+                    st.session_state["precio_notas"] = precio_notas
 
             except Exception as err:
                 st.error(f"❌ DETALLE DEL ERROR:\n\n`{type(err).__name__}: {err}`")
@@ -599,6 +620,10 @@ with tab_ventas:
             st.warning(f"⚠️ {n_revisar} línea(s) necesitan revisión manual (columna Estado). Corrige el SKU/nombre en la tabla antes de copiar.")
         else:
             st.success("✅ Todas las líneas coinciden con el catálogo.")
+
+        precio_notas = st.session_state.get("precio_notas", [])
+        if precio_notas:
+            st.warning("💰 Precios tomados del historial de QuickBooks — revisa antes de confirmar:\n\n" + "\n\n".join(precio_notas))
 
         with st.expander("🐞 Ver respuesta cruda de la IA (debug)"):
             st.caption(f"Modelo usado: {st.session_state.get('ventas_model_used', '—')}")
