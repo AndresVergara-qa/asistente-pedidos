@@ -28,9 +28,42 @@ if qb_client.is_configured() and qb_client.handle_oauth_callback():
     st.success("✅ QuickBooks conectado correctamente.")
     st.rerun()
 
-st.markdown("<h2 style='text-align: center; color: #7B2CBF; font-weight: bold;'>Convenient Distributor</h2>", unsafe_allow_html=True)
-st.title("🧾 Asistente Integral (Ventas y Compras)")
-st.markdown("Mapeo inteligente de pedidos y facturas de proveedores con **Inteligencia Artificial**.")
+st.markdown("""
+<style>
+.cd-hero {
+    background: linear-gradient(135deg, #2A1454 0%, #3D1F8C 55%, #4A2FB8 100%);
+    border-radius: 18px;
+    padding: 2.2rem 2rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+.cd-hero h1 {
+    color: #FFFFFF;
+    font-weight: 800;
+    font-size: 2.1rem;
+    margin: 0 0 0.3rem 0;
+}
+.cd-hero h1 span { color: #FFD100; }
+.cd-hero p {
+    color: #E4DBFA;
+    font-size: 1.05rem;
+    margin: 0;
+}
+div.stButton > button[kind="primary"], div.stButton > button[kind="primaryFormSubmit"] {
+    background-color: #2A1454;
+    border: none;
+    border-radius: 999px;
+    font-weight: 700;
+}
+div.stButton > button[kind="primary"]:hover {
+    background-color: #4A2FB8;
+}
+</style>
+<div class="cd-hero">
+    <h1>Convenient <span>Distributor</span></h1>
+    <p>🧾 Asistente Integral de Pedidos y Compras — mapeo inteligente con Inteligencia Artificial</p>
+</div>
+""", unsafe_allow_html=True)
 
 # =========================================================
 # MODELO DE IA — LÓGICA ÚNICA Y COMPARTIDA (Ventas + Compras)
