@@ -340,6 +340,39 @@ def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalo
 # =========================================================
 # BARRA LATERAL
 # =========================================================
+dark_mode = st.sidebar.toggle("🌙 Modo oscuro", value=False)
+if dark_mode:
+    st.markdown("""
+    <style>
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stBottomBlockContainer"] {
+        background-color: #150B26 !important;
+    }
+    section[data-testid="stSidebar"] {
+        background-color: #0F0720 !important;
+    }
+    body, p, span, label, li, .stMarkdown, [data-testid="stMetricValue"],
+    h1, h2, h3, h4, h5, h6 {
+        color: #EDE6FA !important;
+    }
+    input, textarea, select, div[data-baseweb="select"] > div,
+    div[data-baseweb="input"], div[data-baseweb="textarea"] {
+        background-color: #241640 !important;
+        color: #EDE6FA !important;
+    }
+    div[data-testid="stDataFrame"], div[data-testid="stTable"] {
+        background-color: #1C1130 !important;
+    }
+    [data-testid="stFileUploaderDropzone"], .stExpander, div[data-testid="stExpander"] {
+        background-color: #1C1130 !important;
+        border-color: #3D2A66 !important;
+    }
+    code, .stCodeBlock, pre {
+        background-color: #1C1130 !important;
+        color: #EDE6FA !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.sidebar.header("QuickBooks Online")
 with st.sidebar.expander("🐞 Debug temporal QB secrets"):
     st.write("QB_CLIENT_ID presente:", bool(qb_client.QB_CLIENT_ID), "| largo:", len(qb_client.QB_CLIENT_ID))
