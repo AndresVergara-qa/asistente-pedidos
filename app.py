@@ -7,7 +7,8 @@ import pandas as pd
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-from streamlit_gsheets import GSheetsConnection
+from gsheets_utils import get_gsheets_connection
+import qb_client
 
 # =========================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -20,6 +21,12 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+
+# Si Intuit nos acaba de redirigir de vuelta tras el login (?code=...&realmId=...),
+# intercambiamos el código por tokens antes de dibujar el resto de la página.
+if qb_client.is_configured() and qb_client.handle_oauth_callback():
+    st.success("✅ QuickBooks conectado correctamente.")
+    st.rerun()
 
 st.markdown("<h2 style='text-align: center; color: #7B2CBF; font-weight: bold;'>Convenient Distributor</h2>", unsafe_allow_html=True)
 st.title("🧾 Asistente Integral (Ventas y Compras)")
@@ -130,10 +137,6 @@ def safe_float(val, default=0.0):
 # =========================================================
 # GOOGLE SHEETS (Memoria de precios — solo Ventas)
 # =========================================================
-@st.cache_resource
-def get_gsheets_connection():
-    return st.connection("gsheets", type=GSheetsConnection)
-
 def load_price_memory():
     try:
         conn = get_gsheets_connection()
@@ -311,21 +314,60 @@ cliente_actual = st.sidebar.text_input(
     help="COLOCAR NOMBRE EXACTO DEL CLIENTE EN QUICKBOOKS"
 )
 
+st.sidebar.header("QuickBooks Online")
+qb_connected = qb_client.is_configured() and qb_client.is_connected()
+
+if not qb_client.is_configured():
+    st.sidebar.info("QuickBooks aún no está configurado (faltan QB_CLIENT_ID/SECRET en Secrets).")
+elif qb_connected:
+    st.sidebar.success(f"✅ Conectado ({qb_client.QB_ENVIRONMENT}).")
+    if st.sidebar.button("🔌 Desconectar QuickBooks"):
+        qb_client.disconnect()
+        st.rerun()
+else:
+    auth_url = qb_client.get_authorization_url()
+    st.sidebar.link_button("🔗 Conectar con QuickBooks", auth_url)
+
 st.sidebar.header("Archivos de Referencia")
-qb_file = st.sidebar.file_uploader(
-    "Catálogo de QuickBooks",
-    type=["xlsx", "xls", "csv"],
-    key="qb",
-    help="SUBIR INVENTARIO COMPLETO DE QUICKBOOKS (Ventas y Compras)"
-)
 
 qb_df = None
-if qb_file:
-    try:
-        qb_df = load_dataframe(qb_file)
-        st.sidebar.success(f"✅ Catálogo: {len(qb_df)} productos.")
-    except Exception as e:
-        st.sidebar.error(f"Error cargando Catálogo: {e}")
+if qb_connected:
+    origen_catalogo = st.sidebar.radio(
+        "Origen del catálogo",
+        ["QuickBooks (automático)", "Archivo manual"],
+        key="origen_catalogo",
+    )
+else:
+    origen_catalogo = "Archivo manual"
+
+if origen_catalogo == "QuickBooks (automático)":
+    if st.sidebar.button("🔄 Traer catálogo de QuickBooks"):
+        st.cache_data.clear()
+        st.session_state.pop("qb_catalog_df", None)
+    if "qb_catalog_df" not in st.session_state:
+        try:
+            with st.sidebar:
+                with st.spinner("Descargando catálogo de QuickBooks..."):
+                    st.session_state["qb_catalog_df"] = qb_client.fetch_catalog_df()
+        except Exception as e:
+            st.sidebar.error(f"Error trayendo catálogo de QuickBooks: {e}")
+            st.session_state["qb_catalog_df"] = None
+    qb_df = st.session_state.get("qb_catalog_df")
+    if qb_df is not None and not qb_df.empty:
+        st.sidebar.success(f"✅ Catálogo QB: {len(qb_df)} productos.")
+else:
+    qb_file = st.sidebar.file_uploader(
+        "Catálogo de QuickBooks",
+        type=["xlsx", "xls", "csv"],
+        key="qb",
+        help="SUBIR INVENTARIO COMPLETO DE QUICKBOOKS (Ventas y Compras)"
+    )
+    if qb_file:
+        try:
+            qb_df = load_dataframe(qb_file)
+            st.sidebar.success(f"✅ Catálogo: {len(qb_df)} productos.")
+        except Exception as e:
+            st.sidebar.error(f"Error cargando Catálogo: {e}")
 
 measures_df = None
 LOCAL_MEASURES = [
@@ -551,12 +593,30 @@ with tab_ventas:
         )
         st.code(tsv_from_df(edited_df, ["Product/service", "SKU", "Description", "Qty", "Rate"], leading_blank=True), language="text")
 
+        st.divider()
+        if qb_connected:
+            if st.button("📤 Crear Sales Receipt en QuickBooks", type="primary"):
+                try:
+                    with st.spinner("Creando Sales Receipt en QuickBooks..."):
+                        receipt = qb_client.create_sales_receipt(cliente_actual.strip(), edited_df)
+                    st.success(f"✅ Sales Receipt #{receipt.DocNumber} creado en QuickBooks para {cliente_actual.strip()}.")
+                except Exception as e:
+                    st.error(f"❌ No se pudo crear el Sales Receipt: {e}")
+        else:
+            st.caption("🔌 Conecta QuickBooks (barra lateral) para crear este Sales Receipt directamente, en vez de copiar y pegar.")
+
 # =========================================================
 # PESTAÑA 2: COMPRAS
 # =========================================================
 with tab_compras:
     st.markdown("### Extraer datos de Facturas de Proveedores (Bills)")
     st.write("Sube la imagen de la factura. La IA extraerá los datos y cruzará la información con tu catálogo.")
+
+    proveedor_actual = st.text_input(
+        "Nombre del Proveedor (Vendor en QuickBooks)",
+        value="",
+        help="COLOCAR NOMBRE EXACTO DEL PROVEEDOR EN QUICKBOOKS (se usa solo al crear el Bill)",
+    )
 
     uploaded_bill = st.file_uploader("Sube la factura del proveedor", type=["png", "jpg", "jpeg"], key="bill_uploader")
 
@@ -689,6 +749,20 @@ with tab_compras:
             "selecciona el producto del desplegable manualmente en esa línea puntual."
         )
         st.code(tsv_from_df(edited_compras_df, ["Product/service", "SKU", "Description", "Qty", "Cost"], leading_blank=True), language="text")
+
+        st.divider()
+        if qb_connected:
+            if not proveedor_actual.strip():
+                st.caption("✏️ Escribe el nombre del proveedor arriba para poder crear el Bill en QuickBooks.")
+            elif st.button("📤 Crear Bill en QuickBooks", type="primary"):
+                try:
+                    with st.spinner("Creando Bill en QuickBooks..."):
+                        bill = qb_client.create_bill(proveedor_actual.strip(), edited_compras_df)
+                    st.success(f"✅ Bill #{bill.DocNumber} creado en QuickBooks para {proveedor_actual.strip()}.")
+                except Exception as e:
+                    st.error(f"❌ No se pudo crear el Bill: {e}")
+        else:
+            st.caption("🔌 Conecta QuickBooks (barra lateral) para crear este Bill directamente, en vez de copiar y pegar.")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.divider()
