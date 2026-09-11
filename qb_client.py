@@ -57,7 +57,7 @@ def _load_stored_tokens():
             return None
         row = df.iloc[0]
         return {
-            "realm_id": str(row.get("realm_id", "")).strip(),
+            "realm_id": _clean_numeric_str(row.get("realm_id", "")),
             "access_token": str(row.get("access_token", "")).strip(),
             "refresh_token": str(row.get("refresh_token", "")).strip(),
             "expires_at": str(row.get("expires_at", "")).strip(),
@@ -67,10 +67,27 @@ def _load_stored_tokens():
         return None
 
 
+def _clean_numeric_str(val):
+    """Google Sheets/pandas a veces interpreta IDs largos (ej. el Realm ID de
+    QuickBooks) como número y les agrega '.0' al leerlos, o deja la comilla
+    inicial que usamos para forzar texto literal. Esto revierte ambos casos."""
+    s = str(val).strip()
+    if s.startswith("'"):
+        s = s[1:]
+    if s.endswith(".0") and s[:-2].isdigit():
+        s = s[:-2]
+    return s
+
+
 def _save_tokens(realm_id, access_token, refresh_token, expires_at, environment):
     conn = _get_gsheets_conn()
+    # Google Sheets interpreta el Realm ID (puros dígitos) como número y, al
+    # tener 16 dígitos, pierde precisión (supera lo que un float64 puede
+    # representar exacto). La comilla inicial fuerza texto literal en Sheets
+    # — la propia hoja la descarta, no queda guardada como parte del valor.
+    realm_id_text = f"'{realm_id}" if realm_id else realm_id
     df = pd.DataFrame([{
-        "realm_id": realm_id,
+        "realm_id": realm_id_text,
         "access_token": access_token,
         "refresh_token": refresh_token,
         "expires_at": expires_at,
@@ -180,10 +197,16 @@ def get_client():
         minorversion=75,
     )
     if client.session is None:
-        raise RuntimeError(
-            f"QuickBooks() se creó sin sesión. access_token presente={bool(auth_client.access_token)}, "
-            f"refresh_token presente={bool(auth_client.refresh_token)}, needs_refresh={needs_refresh}, "
-            f"realm_id={tokens['realm_id']!r}"
+        # Red de seguridad: en algunos entornos QuickBooks() no arma la sesión
+        # sola pese a tener access_token/refresh_token válidos. La armamos
+        # manualmente con el mismo mecanismo que usa la librería internamente.
+        from requests_oauthlib import OAuth2Session
+        client.session = OAuth2Session(
+            auth_client.client_id,
+            token={
+                "access_token": auth_client.access_token,
+                "refresh_token": auth_client.refresh_token,
+            },
         )
     st.session_state["qb_client"] = client
     return client
