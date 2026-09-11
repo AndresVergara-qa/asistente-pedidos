@@ -608,7 +608,7 @@ with tab_ventas:
                 try:
                     with st.spinner("Creando Sales Receipt en QuickBooks..."):
                         receipt = qb_client.create_sales_receipt(cliente_actual.strip(), edited_df)
-                    st.success(f"✅ Sales Receipt #{receipt.DocNumber} creado en QuickBooks para {cliente_actual.strip()}.")
+                    st.success(f"✅ Sales Receipt #{receipt.get('DocNumber', receipt.get('Id'))} creado en QuickBooks para {cliente_actual.strip()}.")
                 except Exception as e:
                     st.error(f"❌ No se pudo crear el Sales Receipt: {e}")
         else:
@@ -767,7 +767,7 @@ with tab_compras:
                 try:
                     with st.spinner("Creando Bill en QuickBooks..."):
                         bill = qb_client.create_bill(proveedor_actual.strip(), edited_compras_df)
-                    st.success(f"✅ Bill #{bill.DocNumber} creado en QuickBooks para {proveedor_actual.strip()}.")
+                    st.success(f"✅ Bill #{bill.get('DocNumber', bill.get('Id'))} creado en QuickBooks para {proveedor_actual.strip()}.")
                 except Exception as e:
                     st.error(f"❌ No se pudo crear el Bill: {e}")
         else:

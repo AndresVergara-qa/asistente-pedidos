@@ -6,4 +6,4 @@ google-generativeai
 Pillow
 st-gsheets-connection
 intuit-oauth
-python-quickbooks
+requests
