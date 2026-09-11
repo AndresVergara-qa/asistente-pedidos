@@ -606,15 +606,15 @@ with tab_ventas:
 
         st.divider()
         if qb_connected:
-            if st.button("📤 Crear Sales Receipt en QuickBooks", type="primary"):
+            if st.button("📤 Crear Estimate en QuickBooks", type="primary"):
                 try:
-                    with st.spinner("Creando Sales Receipt en QuickBooks..."):
-                        receipt = qb_client.create_sales_receipt(cliente_actual.strip(), edited_df)
-                    st.success(f"✅ Sales Receipt #{receipt.get('DocNumber', receipt.get('Id'))} creado en QuickBooks para {cliente_actual.strip()}.")
+                    with st.spinner("Creando Estimate en QuickBooks..."):
+                        estimate = qb_client.create_estimate(cliente_actual.strip(), edited_df)
+                    st.success(f"✅ Estimate #{estimate.get('DocNumber', estimate.get('Id'))} creado en QuickBooks (Pending) para {cliente_actual.strip()}.")
                 except Exception as e:
-                    st.error(f"❌ No se pudo crear el Sales Receipt: {e}")
+                    st.error(f"❌ No se pudo crear el Estimate: {e}")
         else:
-            st.caption("🔌 Conecta QuickBooks (barra lateral) para crear este Sales Receipt directamente, en vez de copiar y pegar.")
+            st.caption("🔌 Conecta QuickBooks (barra lateral) para crear este Estimate directamente, en vez de copiar y pegar.")
 
 # =========================================================
 # PESTAÑA 2: COMPRAS

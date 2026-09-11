@@ -294,11 +294,12 @@ def _find_item_id(product_name, sku):
 
 
 # =========================================================
-# CREAR SALES RECEIPT (Ventas)
+# CREAR ESTIMATE (Ventas) — cotización pendiente, no un cobro
 # =========================================================
-def create_sales_receipt(cliente_nombre, lineas_df):
+def create_estimate(cliente_nombre, lineas_df):
     """lineas_df necesita columnas: Product/service, SKU, Qty, Rate.
-    Devuelve el SalesReceipt creado (dict, con Id y DocNumber)."""
+    Devuelve el Estimate creado (dict, con Id y DocNumber). Queda como
+    'Pending' en QuickBooks — no registra ningún cobro."""
     customer = get_or_create_customer(cliente_nombre)
 
     lines = []
@@ -332,14 +333,15 @@ def create_sales_receipt(cliente_nombre, lineas_df):
             + ", ".join(faltantes) + ". Corrige el SKU/nombre en la tabla y vuelve a intentar."
         )
     if not lines:
-        raise ValueError("No hay líneas válidas para crear el Sales Receipt.")
+        raise ValueError("No hay líneas válidas para crear el Estimate.")
 
     body = {
         "CustomerRef": {"value": customer["Id"]},
+        "TxnStatus": "Pending",
         "Line": lines,
     }
-    result = _request("POST", "salesreceipt", json_body=body)
-    return result["SalesReceipt"]
+    result = _request("POST", "estimate", json_body=body)
+    return result["Estimate"]
 
 
 # =========================================================
