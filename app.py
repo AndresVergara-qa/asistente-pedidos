@@ -315,6 +315,12 @@ cliente_actual = st.sidebar.text_input(
 )
 
 st.sidebar.header("QuickBooks Online")
+with st.sidebar.expander("🐞 Debug temporal QB secrets"):
+    st.write("QB_CLIENT_ID presente:", bool(qb_client.QB_CLIENT_ID), "| largo:", len(qb_client.QB_CLIENT_ID))
+    st.write("QB_CLIENT_SECRET presente:", bool(qb_client.QB_CLIENT_SECRET), "| largo:", len(qb_client.QB_CLIENT_SECRET))
+    st.write("QB_REDIRECT_URI:", repr(qb_client.QB_REDIRECT_URI))
+    st.write("QB_ENVIRONMENT:", repr(qb_client.QB_ENVIRONMENT))
+    st.write("Llaves visibles en st.secrets (nombres, no valores):", list(st.secrets.keys()))
 qb_connected = qb_client.is_configured() and qb_client.is_connected()
 
 if not qb_client.is_configured():
