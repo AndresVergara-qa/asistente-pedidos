@@ -307,13 +307,6 @@ def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalo
 # =========================================================
 # BARRA LATERAL
 # =========================================================
-st.sidebar.header("Datos Globales")
-cliente_actual = st.sidebar.text_input(
-    "Nombre del Cliente (Para Ventas)",
-    value="Cliente General",
-    help="COLOCAR NOMBRE EXACTO DEL CLIENTE EN QUICKBOOKS"
-)
-
 st.sidebar.header("QuickBooks Online")
 with st.sidebar.expander("🐞 Debug temporal QB secrets"):
     st.write("QB_CLIENT_ID presente:", bool(qb_client.QB_CLIENT_ID), "| largo:", len(qb_client.QB_CLIENT_ID))
@@ -333,6 +326,37 @@ elif qb_connected:
 else:
     auth_url = qb_client.get_authorization_url()
     st.sidebar.link_button("🔗 Conectar con QuickBooks", auth_url)
+
+st.sidebar.header("Datos Globales")
+NUEVO_CLIENTE_OPCION = "+ Nuevo cliente..."
+customer_id_actual = None
+if qb_connected:
+    if st.sidebar.button("🔄 Traer clientes de QuickBooks"):
+        st.session_state.pop("qb_customers", None)
+    if "qb_customers" not in st.session_state:
+        try:
+            st.session_state["qb_customers"] = qb_client.list_customers()
+        except Exception as e:
+            st.sidebar.error(f"Error trayendo clientes de QuickBooks: {e}")
+            st.session_state["qb_customers"] = []
+    qb_customers = st.session_state.get("qb_customers", [])
+    nombres = [c["DisplayName"] for c in qb_customers]
+    elegido = st.sidebar.selectbox(
+        "Cliente (Para Ventas)",
+        [NUEVO_CLIENTE_OPCION] + nombres,
+        help="Elige un cliente existente en QuickBooks, o crea uno nuevo.",
+    )
+    if elegido == NUEVO_CLIENTE_OPCION:
+        cliente_actual = st.sidebar.text_input("Nombre del nuevo cliente", value="")
+    else:
+        cliente_actual = elegido
+        customer_id_actual = next((c["Id"] for c in qb_customers if c["DisplayName"] == elegido), None)
+else:
+    cliente_actual = st.sidebar.text_input(
+        "Nombre del Cliente (Para Ventas)",
+        value="Cliente General",
+        help="COLOCAR NOMBRE EXACTO DEL CLIENTE EN QUICKBOOKS"
+    )
 
 st.sidebar.header("Archivos de Referencia")
 
@@ -609,8 +633,16 @@ with tab_ventas:
             if st.button("📤 Crear Estimate en QuickBooks", type="primary"):
                 try:
                     with st.spinner("Creando Estimate en QuickBooks..."):
-                        estimate = qb_client.create_estimate(cliente_actual.strip(), edited_df)
+                        estimate, faltantes = qb_client.create_estimate(
+                            cliente_actual.strip(), edited_df, customer_id=customer_id_actual
+                        )
                     st.success(f"✅ Estimate #{estimate.get('DocNumber', estimate.get('Id'))} creado en QuickBooks (Pending) para {cliente_actual.strip()}.")
+                    if faltantes:
+                        st.warning(
+                            "⚠️ Estos productos no existían en el catálogo de QuickBooks — quedaron como línea de "
+                            "texto en el Estimate (sin precio ni ítem vinculado). Créalos en QuickBooks y edita esa "
+                            "línea manualmente: " + ", ".join(faltantes)
+                        )
                 except Exception as e:
                     st.error(f"❌ No se pudo crear el Estimate: {e}")
         else:
@@ -623,11 +655,35 @@ with tab_compras:
     st.markdown("### Extraer datos de Facturas de Proveedores (Bills)")
     st.write("Sube la imagen de la factura. La IA extraerá los datos y cruzará la información con tu catálogo.")
 
-    proveedor_actual = st.text_input(
-        "Nombre del Proveedor (Vendor en QuickBooks)",
-        value="",
-        help="COLOCAR NOMBRE EXACTO DEL PROVEEDOR EN QUICKBOOKS (se usa solo al crear el Bill)",
-    )
+    NUEVO_PROVEEDOR_OPCION = "+ Nuevo proveedor..."
+    vendor_id_actual = None
+    if qb_connected:
+        if st.button("🔄 Traer proveedores de QuickBooks"):
+            st.session_state.pop("qb_vendors", None)
+        if "qb_vendors" not in st.session_state:
+            try:
+                st.session_state["qb_vendors"] = qb_client.list_vendors()
+            except Exception as e:
+                st.error(f"Error trayendo proveedores de QuickBooks: {e}")
+                st.session_state["qb_vendors"] = []
+        qb_vendors = st.session_state.get("qb_vendors", [])
+        nombres_v = [v["DisplayName"] for v in qb_vendors]
+        elegido_v = st.selectbox(
+            "Proveedor (Vendor en QuickBooks)",
+            [NUEVO_PROVEEDOR_OPCION] + nombres_v,
+            help="Elige un proveedor existente en QuickBooks, o crea uno nuevo.",
+        )
+        if elegido_v == NUEVO_PROVEEDOR_OPCION:
+            proveedor_actual = st.text_input("Nombre del nuevo proveedor", value="")
+        else:
+            proveedor_actual = elegido_v
+            vendor_id_actual = next((v["Id"] for v in qb_vendors if v["DisplayName"] == elegido_v), None)
+    else:
+        proveedor_actual = st.text_input(
+            "Nombre del Proveedor (Vendor en QuickBooks)",
+            value="",
+            help="COLOCAR NOMBRE EXACTO DEL PROVEEDOR EN QUICKBOOKS (se usa solo al crear el Bill)",
+        )
 
     uploaded_bill = st.file_uploader("Sube la factura del proveedor", type=["png", "jpg", "jpeg"], key="bill_uploader")
 
@@ -768,7 +824,7 @@ with tab_compras:
             elif st.button("📤 Crear Bill en QuickBooks", type="primary"):
                 try:
                     with st.spinner("Creando Bill en QuickBooks..."):
-                        bill = qb_client.create_bill(proveedor_actual.strip(), edited_compras_df)
+                        bill = qb_client.create_bill(proveedor_actual.strip(), edited_compras_df, vendor_id=vendor_id_actual)
                     st.success(f"✅ Bill #{bill.get('DocNumber', bill.get('Id'))} creado en QuickBooks para {proveedor_actual.strip()}.")
                 except Exception as e:
                     st.error(f"❌ No se pudo crear el Bill: {e}")

@@ -259,8 +259,22 @@ def fetch_catalog_df():
 
 
 # =========================================================
-# CLIENTES / PROVEEDORES (buscar o crear)
+# CLIENTES / PROVEEDORES (listar / buscar o crear)
 # =========================================================
+def list_customers():
+    """Devuelve [{'Id':..., 'DisplayName':...}, ...] de todos los clientes
+    activos, para elegir de una lista en vez de escribir el nombre a mano
+    (evita crear clientes duplicados por typos)."""
+    customers = _query("SELECT Id, DisplayName FROM Customer WHERE Active = true MAXRESULTS 1000").get("Customer", [])
+    return sorted(customers, key=lambda c: c.get("DisplayName", "").upper())
+
+
+def list_vendors():
+    """Igual que list_customers() pero para proveedores (Vendor)."""
+    vendors = _query("SELECT Id, DisplayName FROM Vendor WHERE Active = true MAXRESULTS 1000").get("Vendor", [])
+    return sorted(vendors, key=lambda v: v.get("DisplayName", "").upper())
+
+
 def get_or_create_customer(display_name):
     safe_name = _escape_sql(display_name)
     matches = _query(f"SELECT * FROM Customer WHERE DisplayName = '{safe_name}'").get("Customer", [])
@@ -296,11 +310,19 @@ def _find_item_id(product_name, sku):
 # =========================================================
 # CREAR ESTIMATE (Ventas) — cotización pendiente, no un cobro
 # =========================================================
-def create_estimate(cliente_nombre, lineas_df):
+def create_estimate(cliente_nombre, lineas_df, customer_id=None):
     """lineas_df necesita columnas: Product/service, SKU, Qty, Rate.
-    Devuelve el Estimate creado (dict, con Id y DocNumber). Queda como
-    'Pending' en QuickBooks — no registra ningún cobro."""
-    customer = get_or_create_customer(cliente_nombre)
+    Si customer_id viene dado (cliente elegido de la lista de QuickBooks), se
+    usa directamente — si no, se busca/crea por nombre exacto.
+    Devuelve (estimate, faltantes): el Estimate creado (dict, con Id y
+    DocNumber; queda como 'Pending', no registra ningún cobro) y la lista de
+    nombres de producto que no se encontraron en el catálogo de QuickBooks
+    (esos quedan como línea de texto en el Estimate, sin ItemRef, para que se
+    vea que falta darlos de alta)."""
+    if customer_id:
+        customer = {"Id": customer_id}
+    else:
+        customer = get_or_create_customer(cliente_nombre)
 
     lines = []
     faltantes = []
@@ -315,6 +337,11 @@ def create_estimate(cliente_nombre, lineas_df):
         item_id = _find_item_id(product_name, sku)
         if not item_id:
             faltantes.append(product_name)
+            lines.append({
+                "DetailType": "DescriptionOnly",
+                "Description": f"[FALTA EN CATÁLOGO QB] {product_name} — Cant: {qty} — Precio sugerido: {rate}",
+                "DescriptionLineDetail": {},
+            })
             continue
 
         lines.append({
@@ -327,11 +354,6 @@ def create_estimate(cliente_nombre, lineas_df):
             },
         })
 
-    if faltantes:
-        raise ValueError(
-            "No se encontraron en QuickBooks (con ese SKU/nombre exacto) estos productos: "
-            + ", ".join(faltantes) + ". Corrige el SKU/nombre en la tabla y vuelve a intentar."
-        )
     if not lines:
         raise ValueError("No hay líneas válidas para crear el Estimate.")
 
@@ -341,16 +363,21 @@ def create_estimate(cliente_nombre, lineas_df):
         "Line": lines,
     }
     result = _request("POST", "estimate", json_body=body)
-    return result["Estimate"]
+    return result["Estimate"], faltantes
 
 
 # =========================================================
 # CREAR BILL (Compras)
 # =========================================================
-def create_bill(vendor_nombre, lineas_df):
+def create_bill(vendor_nombre, lineas_df, vendor_id=None):
     """lineas_df necesita columnas: Product/service, SKU, Qty, Cost.
+    Si vendor_id viene dado (proveedor elegido de la lista de QuickBooks), se
+    usa directamente — si no, se busca/crea por nombre exacto.
     Devuelve el Bill creado (dict, con Id y DocNumber)."""
-    vendor = get_or_create_vendor(vendor_nombre)
+    if vendor_id:
+        vendor = {"Id": vendor_id}
+    else:
+        vendor = get_or_create_vendor(vendor_nombre)
 
     lines = []
     faltantes = []
