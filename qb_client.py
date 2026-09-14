@@ -361,22 +361,11 @@ def _find_item_id(product_name, sku):
     return None
 
 
-# =========================================================
-# CREAR SALES RECEIPT (venta ya pagada — usado por el módulo de pruebas
-# para sembrar historial real de ventas y poder probar suggest_price())
-# =========================================================
-def create_sales_receipt(cliente_nombre, lineas_df, customer_id=None, txn_date=None):
-    """lineas_df necesita columnas: Product/service, SKU, Qty, Rate.
-    Si customer_id viene dado se usa directamente; si no, se busca/crea por
-    nombre exacto. txn_date (opcional, "YYYY-MM-DD") fija la fecha de la
-    venta — útil para simular historial de precios en distintas fechas.
-    Devuelve el SalesReceipt creado (dict, con Id y DocNumber). A diferencia
-    del Estimate, esto SÍ queda registrado como cobrado en QuickBooks."""
-    if customer_id:
-        customer = {"Id": customer_id}
-    else:
-        customer = get_or_create_customer(cliente_nombre)
-
+def _build_sales_item_lines(lineas_df):
+    """Arma las líneas SalesItemLineDetail (Invoice/SalesReceipt) desde un
+    DataFrame con columnas Product/service, SKU, Qty, Rate. Devuelve
+    (lines, faltantes) — faltantes son productos que no se encontraron en
+    el catálogo de QuickBooks."""
     lines = []
     faltantes = []
     for _, row in lineas_df.iterrows():
@@ -401,7 +390,25 @@ def create_sales_receipt(cliente_nombre, lineas_df, customer_id=None, txn_date=N
                 "UnitPrice": rate,
             },
         })
+    return lines, faltantes
 
+
+# =========================================================
+# CREAR SALES RECEIPT (venta ya pagada, en un solo paso)
+# =========================================================
+def create_sales_receipt(cliente_nombre, lineas_df, customer_id=None, txn_date=None):
+    """lineas_df necesita columnas: Product/service, SKU, Qty, Rate.
+    Si customer_id viene dado se usa directamente; si no, se busca/crea por
+    nombre exacto. txn_date (opcional, "YYYY-MM-DD") fija la fecha de la
+    venta — útil para simular historial de precios en distintas fechas.
+    Devuelve el SalesReceipt creado (dict, con Id y DocNumber). A diferencia
+    del Estimate, esto SÍ queda registrado como cobrado en QuickBooks."""
+    if customer_id:
+        customer = {"Id": customer_id}
+    else:
+        customer = get_or_create_customer(cliente_nombre)
+
+    lines, faltantes = _build_sales_item_lines(lineas_df)
     if faltantes:
         raise ValueError(
             "No se encontraron en QuickBooks (con ese SKU/nombre exacto) estos productos: "
@@ -418,6 +425,55 @@ def create_sales_receipt(cliente_nombre, lineas_df, customer_id=None, txn_date=N
         body["TxnDate"] = txn_date
     result = _request("POST", "salesreceipt", json_body=body)
     return result["SalesReceipt"]
+
+
+# =========================================================
+# CREAR INVOICE + PAYMENT (venta ya pagada, en dos pasos — el flujo real
+# de la empresa: factura, y luego un pago aplicado sobre ella)
+# =========================================================
+def create_invoice_paid(cliente_nombre, lineas_df, customer_id=None, txn_date=None):
+    """lineas_df necesita columnas: Product/service, SKU, Qty, Rate.
+    Crea un Invoice y, si se creó bien, un Payment aplicado a ese Invoice por
+    el monto total — el Invoice queda con Balance = 0 (pagado), igual que en
+    el flujo real de la empresa (a diferencia del Sales Receipt, que es un
+    atajo de un solo paso).
+    Devuelve (invoice, payment) — ambos dict, con Id y DocNumber."""
+    if customer_id:
+        customer = {"Id": customer_id}
+    else:
+        customer = get_or_create_customer(cliente_nombre)
+
+    lines, faltantes = _build_sales_item_lines(lineas_df)
+    if faltantes:
+        raise ValueError(
+            "No se encontraron en QuickBooks (con ese SKU/nombre exacto) estos productos: "
+            + ", ".join(faltantes) + "."
+        )
+    if not lines:
+        raise ValueError("No hay líneas válidas para crear el Invoice.")
+
+    invoice_body = {
+        "CustomerRef": {"value": customer["Id"]},
+        "Line": lines,
+    }
+    if txn_date:
+        invoice_body["TxnDate"] = txn_date
+    invoice = _request("POST", "invoice", json_body=invoice_body)["Invoice"]
+
+    total_amt = invoice.get("TotalAmt", sum(l["Amount"] for l in lines))
+    payment_body = {
+        "CustomerRef": {"value": customer["Id"]},
+        "TotalAmt": total_amt,
+        "Line": [{
+            "Amount": total_amt,
+            "LinkedTxn": [{"TxnId": invoice["Id"], "TxnType": "Invoice"}],
+        }],
+    }
+    if txn_date:
+        payment_body["TxnDate"] = txn_date
+    payment = _request("POST", "payment", json_body=payment_body)["Payment"]
+
+    return invoice, payment
 
 
 # =========================================================

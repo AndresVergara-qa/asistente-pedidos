@@ -1025,7 +1025,7 @@ with tab_compras:
 st.divider()
 st.subheader("🧪 Módulo de Pruebas — Registrar Venta ya Pagada")
 st.caption(
-    "Crea ventas de prueba (Sales Receipt, ya cobradas) directo del catálogo automático de QuickBooks, "
+    "Crea ventas de prueba (Invoice + Payment, ya cobradas) directo del catálogo automático de QuickBooks, "
     "sin pasar por la IA — sirve para sembrar historial real de precios en el Sandbox y así poder probar "
     "el precio automático por cliente/producto."
 )
@@ -1077,19 +1077,23 @@ else:
                 st.session_state["test_sale_lines"] = []
                 st.rerun()
         with col_submit:
-            if st.button("💰 Crear Venta Pagada en QuickBooks", type="primary"):
+            if st.button("💰 Crear Invoice Pagado en QuickBooks", type="primary"):
                 try:
-                    with st.spinner("Creando Sales Receipt en QuickBooks..."):
-                        receipt = qb_client.create_sales_receipt(
+                    with st.spinner("Creando Invoice + Payment en QuickBooks..."):
+                        invoice, payment = qb_client.create_invoice_paid(
                             test_cliente_elegido,
                             pd.DataFrame(test_lines),
                             customer_id=test_customer_id,
                             txn_date=test_fecha.strftime("%Y-%m-%d"),
                         )
-                    st.success(f"✅ Venta #{receipt.get('DocNumber', receipt.get('Id'))} registrada (pagada) para {test_cliente_elegido} el {test_fecha.strftime('%Y-%m-%d')}.")
+                    st.success(
+                        f"✅ Invoice #{invoice.get('DocNumber', invoice.get('Id'))} creado y pagado "
+                        f"(Payment #{payment.get('DocNumber', payment.get('Id'))}) para {test_cliente_elegido} "
+                        f"el {test_fecha.strftime('%Y-%m-%d')}."
+                    )
                     st.session_state["test_sale_lines"] = []
                 except Exception as e:
-                    st.error(f"❌ No se pudo crear la venta: {e}")
+                    st.error(f"❌ No se pudo crear el Invoice/Payment: {e}")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.divider()
