@@ -123,17 +123,58 @@ def get_model_candidates(_api_key_hash, _v=3):
         pass
     return GEMINI_FALLBACK_PRIORITY
 
+GEMINI_SETTINGS_WORKSHEET = "app_settings"
+
+
+def load_working_model():
+    """Último modelo de Gemini que funcionó, guardado en Sheets (persiste
+    entre sesiones/días). Devuelve (modelo_o_None, fecha_YYYY-MM-DD_o_None)."""
+    try:
+        conn = get_gsheets_connection()
+        df = conn.read(worksheet=GEMINI_SETTINGS_WORKSHEET, ttl=0)
+        if df is None or df.empty:
+            return None, None
+        row = df.iloc[0]
+        model = str(row.get("working_model", "")).strip()
+        date = str(row.get("date", "")).strip()
+        return (model or None), (date or None)
+    except Exception:
+        return None, None
+
+
+def save_working_model(model_name):
+    try:
+        conn = get_gsheets_connection()
+        df = pd.DataFrame([{"working_model": model_name, "date": datetime.now().strftime("%Y-%m-%d")}])
+        conn.update(worksheet=GEMINI_SETTINGS_WORKSHEET, data=df)
+    except Exception:
+        pass  # si no existe la pestaña "app_settings" en el Sheet, simplemente no persiste el atajo
+
+
 def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artificial..."):
     """
     Intenta los modelos disponibles en orden de prioridad (mejor primero) y
     devuelve (texto_respuesta, nombre_modelo_usado, error).
-    Si ya encontramos un modelo que funciona en esta sesión, lo probamos
-    primero (evita repetir el descubrimiento en cada clic). El número de
-    intentos y el tiempo por intento están acotados para que un modelo lento
-    o con problemas no bloquee la app por varios minutos.
+
+    Atajo diario: si un modelo ya funcionó HOY (guardado en Sheets, persiste
+    entre sesiones), se prueba primero — pero nunca se descarta el resto de
+    la lista: si ese falla, se sigue bajando por prioridad normal, y cada día
+    se vuelve a intentar desde el modelo más nuevo primero (para no quedar
+    pegado en un modelo más débil si el mejor ya se recuperó).
+    El timeout por intento está acotado para que un modelo lento o con
+    problemas no bloquee la app por varios minutos.
     """
     last_error = ""
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if "persisted_working_model" not in st.session_state:
+        st.session_state["persisted_working_model"] = load_working_model()
+    persisted_model, persisted_date = st.session_state["persisted_working_model"]
+
     preferred = st.session_state.get("working_model")
+    if not preferred and persisted_date == today:
+        preferred = persisted_model
+
     candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
     ordered = ([preferred] if preferred else []) + [c for c in candidates if c != preferred]
     ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
@@ -144,11 +185,14 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
             t_attempt = time.perf_counter()
             try:
                 model = genai.GenerativeModel(model_name)
-                response = model.generate_content(parts, request_options={"timeout": 25})
+                response = model.generate_content(parts, request_options={"timeout": 12})
                 if response and response.text:
                     attempts.append((model_name, time.perf_counter() - t_attempt, "ok"))
                     st.session_state["working_model"] = model_name
                     st.session_state["last_gemini_attempts"] = attempts
+                    if persisted_model != model_name or persisted_date != today:
+                        save_working_model(model_name)
+                        st.session_state["persisted_working_model"] = (model_name, today)
                     return response.text, model_name, None
             except Exception as err:
                 attempts.append((model_name, time.perf_counter() - t_attempt, f"error: {err}"))
