@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import re
 import difflib
@@ -137,17 +138,23 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
     ordered = ([preferred] if preferred else []) + [c for c in candidates if c != preferred]
     ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
 
+    attempts = []  # [(model_name, segundos, "ok"/"error: ...")]
     with st.spinner(spinner_text):
         for i, model_name in enumerate(ordered, start=1):
+            t_attempt = time.perf_counter()
             try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content(parts, request_options={"timeout": 25})
                 if response and response.text:
+                    attempts.append((model_name, time.perf_counter() - t_attempt, "ok"))
                     st.session_state["working_model"] = model_name
+                    st.session_state["last_gemini_attempts"] = attempts
                     return response.text, model_name, None
             except Exception as err:
+                attempts.append((model_name, time.perf_counter() - t_attempt, f"error: {err}"))
                 last_error = f"{model_name}: {err}"
                 continue
+    st.session_state["last_gemini_attempts"] = attempts
     return None, None, last_error
 
 
@@ -542,6 +549,8 @@ with tab_ventas:
             st.error("⚠️ Debes subir una imagen o pegar el texto del pedido.")
         else:
             try:
+                t_inicio = time.perf_counter()
+                timing = {}
                 genai.configure(api_key=DEFAULT_API_KEY.strip())
 
                 cols_qb = [c for c in [prod_col, sku_col, sales_desc_col] if c is not None]
@@ -551,6 +560,8 @@ with tab_ventas:
                 if measures_df is not None:
                     m_cols = [c for c in measures_df.columns if any(k in str(c).upper() for k in ["PROD", "PREST", "BOX", "PALLET", "MEDIDA"])]
                     measures_csv = measures_df[m_cols].dropna(how="all").to_csv(index=False) if m_cols else measures_df.to_csv(index=False)
+                timing["1_armar_catalogo_csv"] = time.perf_counter() - t_inicio
+                timing["catalogo_chars_enviados"] = len(catalog_csv)
 
                 prompt = f"""
                 Eres un experto en logística y facturación en QuickBooks para 'Convenient Distributor'.
@@ -596,9 +607,13 @@ with tab_ventas:
                 if pasted_text.strip():
                     ai_input.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
 
+                t_antes_gemini = time.perf_counter()
                 raw_text, used_model, error = call_gemini(ai_input)
+                timing["2_llamada_gemini"] = time.perf_counter() - t_antes_gemini
+                timing["gemini_intentos"] = st.session_state.get("last_gemini_attempts", [])
                 if raw_text is None:
                     st.error(f"❌ Error de conexión: {error}")
+                    st.session_state["timing_ventas"] = timing
                     st.stop()
 
                 try:
@@ -606,11 +621,13 @@ with tab_ventas:
                 except json.JSONDecodeError:
                     st.error("❌ La IA no devolvió un JSON válido. Mira la respuesta cruda abajo para depurar.")
                     st.code(raw_text, language="text")
+                    st.session_state["timing_ventas"] = timing
                     st.stop()
 
                 st.session_state["ventas_raw_response"] = raw_text
                 st.session_state["ventas_model_used"] = used_model
 
+                t_antes_memoria = time.perf_counter()
                 with st.spinner("💰 Consultando Google Sheets y precios históricos..."):
                     price_mem = load_price_memory()
                     client_mem = price_mem[price_mem["Cliente"].astype(str).str.strip().str.upper() == cliente_actual.strip().upper()]
@@ -655,7 +672,9 @@ with tab_ventas:
                         })
                         if final_rate == 0.0 and qb_connected:
                             precios_pendientes.append((row_idx, actual_pname, sku_val))
+                    timing["3_memoria_y_matching"] = time.perf_counter() - t_antes_memoria
 
+                    t_antes_precios_qb = time.perf_counter()
                     if precios_pendientes:
                         with st.spinner(f"Consultando en QuickBooks el último precio vendido de {len(precios_pendientes)} producto(s)..."):
                             for row_idx, pname, sku_val in precios_pendientes:
@@ -670,11 +689,17 @@ with tab_ventas:
                                             precio_notas.append(f"**{pname}**: {nota}")
                                 except Exception:
                                     continue  # si falla la consulta de precio, se deja en 0 para revisión manual
+                    timing["4_precios_desde_qb"] = time.perf_counter() - t_antes_precios_qb
+                    timing["4_precios_lineas_consultadas"] = len(precios_pendientes)
 
                     st.session_state["res_df"] = pd.DataFrame(results)
                     st.session_state["precio_notas"] = precio_notas
 
+                timing["total"] = time.perf_counter() - t_inicio
+                st.session_state["timing_ventas"] = timing
+
             except Exception as err:
+                st.session_state["timing_ventas"] = timing if "timing" in locals() else {}
                 st.error(f"❌ DETALLE DEL ERROR:\n\n`{type(err).__name__}: {err}`")
 
     if "res_df" in st.session_state:
@@ -690,6 +715,18 @@ with tab_ventas:
         precio_notas = st.session_state.get("precio_notas", [])
         if precio_notas:
             st.warning("💰 Precios tomados del historial de QuickBooks — revisa antes de confirmar:\n\n" + "\n\n".join(precio_notas))
+
+        timing = st.session_state.get("timing_ventas", {})
+        if timing:
+            with st.expander(f"⏱️ Tiempos de este procesamiento (total: {timing.get('total', 0):.1f}s)"):
+                st.write(f"1. Armar catálogo para enviarle a la IA: **{timing.get('1_armar_catalogo_csv', 0):.2f}s** "
+                         f"({timing.get('catalogo_chars_enviados', 0):,} caracteres enviados)")
+                st.write(f"2. Llamada a Gemini (IA): **{timing.get('2_llamada_gemini', 0):.2f}s**")
+                for modelo, segundos, resultado in timing.get("gemini_intentos", []):
+                    st.caption(f"　　↳ {modelo}: {segundos:.2f}s — {resultado}")
+                st.write(f"3. Memoria de precios (Sheets) + matching contra catálogo: **{timing.get('3_memoria_y_matching', 0):.2f}s**")
+                st.write(f"4. Precios consultados en vivo a QuickBooks: **{timing.get('4_precios_desde_qb', 0):.2f}s** "
+                         f"({timing.get('4_precios_lineas_consultadas', 0)} línea(s) consultadas)")
 
         with st.expander("🐞 Ver respuesta cruda de la IA (debug)"):
             st.caption(f"Modelo usado: {st.session_state.get('ventas_model_used', '—')}")
