@@ -362,6 +362,65 @@ def _find_item_id(product_name, sku):
 
 
 # =========================================================
+# CREAR SALES RECEIPT (venta ya pagada — usado por el módulo de pruebas
+# para sembrar historial real de ventas y poder probar suggest_price())
+# =========================================================
+def create_sales_receipt(cliente_nombre, lineas_df, customer_id=None, txn_date=None):
+    """lineas_df necesita columnas: Product/service, SKU, Qty, Rate.
+    Si customer_id viene dado se usa directamente; si no, se busca/crea por
+    nombre exacto. txn_date (opcional, "YYYY-MM-DD") fija la fecha de la
+    venta — útil para simular historial de precios en distintas fechas.
+    Devuelve el SalesReceipt creado (dict, con Id y DocNumber). A diferencia
+    del Estimate, esto SÍ queda registrado como cobrado en QuickBooks."""
+    if customer_id:
+        customer = {"Id": customer_id}
+    else:
+        customer = get_or_create_customer(cliente_nombre)
+
+    lines = []
+    faltantes = []
+    for _, row in lineas_df.iterrows():
+        product_name = str(row.get("Product/service", "")).strip()
+        sku = str(row.get("SKU", "")).strip()
+        qty = float(row.get("Qty", 0) or 0)
+        rate = float(row.get("Rate", 0) or 0)
+        if not product_name or qty <= 0:
+            continue
+
+        item_id = _find_item_id(product_name, sku)
+        if not item_id:
+            faltantes.append(product_name)
+            continue
+
+        lines.append({
+            "Amount": round(qty * rate, 2),
+            "DetailType": "SalesItemLineDetail",
+            "SalesItemLineDetail": {
+                "ItemRef": {"value": item_id},
+                "Qty": qty,
+                "UnitPrice": rate,
+            },
+        })
+
+    if faltantes:
+        raise ValueError(
+            "No se encontraron en QuickBooks (con ese SKU/nombre exacto) estos productos: "
+            + ", ".join(faltantes) + "."
+        )
+    if not lines:
+        raise ValueError("No hay líneas válidas para crear el Sales Receipt.")
+
+    body = {
+        "CustomerRef": {"value": customer["Id"]},
+        "Line": lines,
+    }
+    if txn_date:
+        body["TxnDate"] = txn_date
+    result = _request("POST", "salesreceipt", json_body=body)
+    return result["SalesReceipt"]
+
+
+# =========================================================
 # CREAR ESTIMATE (Ventas) — cotización pendiente, no un cobro
 # =========================================================
 def create_estimate(cliente_nombre, lineas_df, customer_id=None):

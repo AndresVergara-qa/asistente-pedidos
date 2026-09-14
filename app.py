@@ -1009,6 +1009,75 @@ with tab_compras:
         else:
             st.caption("🔌 Conecta QuickBooks (barra lateral) para crear este Bill directamente, en vez de copiar y pegar.")
 
+st.divider()
+st.subheader("🧪 Módulo de Pruebas — Registrar Venta ya Pagada")
+st.caption(
+    "Crea ventas de prueba (Sales Receipt, ya cobradas) directo del catálogo automático de QuickBooks, "
+    "sin pasar por la IA — sirve para sembrar historial real de precios en el Sandbox y así poder probar "
+    "el precio automático por cliente/producto."
+)
+
+test_catalog_df = st.session_state.get("qb_catalog_df")
+
+if not qb_connected:
+    st.info("🔌 Conecta QuickBooks (barra lateral) para usar este módulo.")
+elif test_catalog_df is None or test_catalog_df.empty:
+    st.info("📥 Usa el botón '🔄 Traer catálogo de QuickBooks' en la barra lateral primero (este módulo usa siempre el catálogo automático, sin importar qué tengas elegido arriba).")
+else:
+    test_nombres_cliente = [c["DisplayName"] for c in st.session_state.get("qb_customers", [])]
+    col_cli, col_fecha = st.columns([2, 1])
+    with col_cli:
+        test_cliente_elegido = st.selectbox("Cliente", test_nombres_cliente, key="test_cliente_sel")
+    with col_fecha:
+        test_fecha = st.date_input("Fecha de la venta", value=datetime.now(), key="test_fecha_sel")
+    test_customer_id = next(
+        (c["Id"] for c in st.session_state.get("qb_customers", []) if c["DisplayName"] == test_cliente_elegido),
+        None,
+    )
+
+    test_producto_opciones = [f"{row['Product/Service']}  |  SKU: {row['SKU']}" for _, row in test_catalog_df.iterrows()]
+    col_prod, col_qty, col_rate, col_add = st.columns([3, 1, 1, 1])
+    with col_prod:
+        test_producto_elegido = st.selectbox("Producto (catálogo QB)", test_producto_opciones, key="test_producto_sel")
+    with col_qty:
+        test_qty = st.number_input("Cantidad", min_value=1, value=1, key="test_qty_sel")
+    with col_rate:
+        test_rate = st.number_input("Precio ($)", min_value=0.0, value=0.0, step=0.01, key="test_rate_sel")
+    with col_add:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("➕ Agregar"):
+            idx = test_producto_opciones.index(test_producto_elegido)
+            row = test_catalog_df.iloc[idx]
+            st.session_state.setdefault("test_sale_lines", []).append({
+                "Product/service": row["Product/Service"],
+                "SKU": row["SKU"],
+                "Qty": test_qty,
+                "Rate": test_rate,
+            })
+
+    test_lines = st.session_state.get("test_sale_lines", [])
+    if test_lines:
+        st.dataframe(pd.DataFrame(test_lines), hide_index=True, width="stretch")
+        col_clear, col_submit = st.columns([1, 2])
+        with col_clear:
+            if st.button("🧹 Vaciar líneas"):
+                st.session_state["test_sale_lines"] = []
+                st.rerun()
+        with col_submit:
+            if st.button("💰 Crear Venta Pagada en QuickBooks", type="primary"):
+                try:
+                    with st.spinner("Creando Sales Receipt en QuickBooks..."):
+                        receipt = qb_client.create_sales_receipt(
+                            test_cliente_elegido,
+                            pd.DataFrame(test_lines),
+                            customer_id=test_customer_id,
+                            txn_date=test_fecha.strftime("%Y-%m-%d"),
+                        )
+                    st.success(f"✅ Venta #{receipt.get('DocNumber', receipt.get('Id'))} registrada (pagada) para {test_cliente_elegido} el {test_fecha.strftime('%Y-%m-%d')}.")
+                    st.session_state["test_sale_lines"] = []
+                except Exception as e:
+                    st.error(f"❌ No se pudo crear la venta: {e}")
+
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.divider()
 with st.expander("❓ ¿Qué es esto y cómo funciona?"):
