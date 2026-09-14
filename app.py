@@ -441,14 +441,27 @@ qb_connected = qb_client.is_configured() and qb_client.is_connected()
 
 if not qb_client.is_configured():
     st.sidebar.info("QuickBooks aún no está configurado (faltan QB_CLIENT_ID/SECRET en Secrets).")
-elif qb_connected:
-    st.sidebar.success(f"✅ Conectado ({qb_client.QB_ENVIRONMENT}).")
-    if st.sidebar.button("🔌 Desconectar QuickBooks"):
-        qb_client.disconnect()
-        st.rerun()
 else:
-    auth_url = qb_client.get_authorization_url()
-    st.sidebar.link_button("🔗 Conectar con QuickBooks", auth_url)
+    if qb_connected:
+        st.sidebar.success(f"✅ Conectado ({qb_client.QB_ENVIRONMENT}).")
+        if st.sidebar.button("🔌 Desconectar QuickBooks"):
+            try:
+                qb_client.disconnect()
+                st.sidebar.info("Desconectado. Si sigue apareciendo 'Conectado', revisa la pestaña 'qb_tokens' de tu Google Sheet.")
+            except Exception as e:
+                st.sidebar.error(f"No se pudo desconectar (falló el guardado en Sheets): {e}")
+            st.rerun()
+    # El botón para (re)conectar siempre está disponible — así nunca quedas
+    # bloqueado si el estado "Conectado" no coincide con la realidad (ej. un
+    # refresh token inválido, o un desconectar que falló al guardar).
+    try:
+        auth_url = qb_client.get_authorization_url()
+        st.sidebar.link_button(
+            "🔄 Reconectar con QuickBooks" if qb_connected else "🔗 Conectar con QuickBooks",
+            auth_url,
+        )
+    except Exception as e:
+        st.sidebar.error(f"No se pudo generar el link de conexión: {e}")
 
 st.sidebar.header("Datos Globales")
 NUEVO_CLIENTE_OPCION = "+ Nuevo cliente..."
