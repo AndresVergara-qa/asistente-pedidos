@@ -777,7 +777,13 @@ with tab_ventas:
 
         precio_notas = st.session_state.get("precio_notas", [])
         if precio_notas:
-            st.warning("💰 Precios tomados del historial de QuickBooks — revisa antes de confirmar:\n\n" + "\n\n".join(precio_notas))
+            n_alertas = sum(1 for n in precio_notas if "⚠️" in n)
+            titulo = f"💰 {len(precio_notas)} precio(s) tomados del historial de QuickBooks"
+            if n_alertas:
+                titulo += f" — {n_alertas} con posible cambio de precio ⚠️"
+            with st.expander(titulo):
+                for nota in precio_notas:
+                    st.markdown(nota)
 
         timing = st.session_state.get("timing_ventas", {})
         if timing:

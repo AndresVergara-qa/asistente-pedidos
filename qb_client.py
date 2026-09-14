@@ -320,21 +320,22 @@ def suggest_price(item_id, customer_id=None, diff_threshold_pct=8):
     cust_price = get_last_price(item_id, customer_id=customer_id) if customer_id else None
     any_price = get_last_price(item_id, customer_id=None)
 
-    if cust_price and any_price:
-        if any_price["date"] > cust_price["date"] and cust_price["rate"] > 0:
+    if cust_price:
+        note = f"Precio usado: **${cust_price['rate']:.2f}** — última venta a este cliente ({cust_price['date']})."
+        if any_price and any_price["date"] > cust_price["date"] and cust_price["rate"] > 0:
             diff_pct = abs(any_price["rate"] - cust_price["rate"]) / cust_price["rate"] * 100
             if diff_pct >= diff_threshold_pct:
-                note = (
-                    f"Último precio a este cliente: ${cust_price['rate']:.2f} ({cust_price['date']}). "
-                    f"Venta más reciente a otro cliente: ${any_price['rate']:.2f} ({any_price['date']}) "
+                note += (
+                    f" ⚠️ Venta más reciente a otro cliente: ${any_price['rate']:.2f} ({any_price['date']}) "
                     f"— {diff_pct:.0f}% de diferencia, revisa si cambió el precio."
                 )
-                return cust_price["rate"], note
-        return cust_price["rate"], None
-    if cust_price:
-        return cust_price["rate"], None
+        return cust_price["rate"], note
     if any_price:
-        return any_price["rate"], f"Sin historial con este cliente; se usó el último precio vendido (a otro cliente) el {any_price['date']}."
+        note = (
+            f"Sin historial con este cliente; se usó el último precio vendido (a otro cliente): "
+            f"**${any_price['rate']:.2f}** ({any_price['date']})."
+        )
+        return any_price["rate"], note
     return None, None
 
 
