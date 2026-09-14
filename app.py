@@ -103,10 +103,15 @@ def _is_usable_model(model_name):
         return False
     if any(bad in n for bad in ["embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm", "vision"]):
         return False
+    # Las variantes "-lite" leen peor las imágenes (se comprobó que confunden
+    # formatos de producto, ej. "12pk cans" vs "2lts x8") — la precisión del
+    # pedido importa más que ganar unos segundos, así que se excluyen.
+    if "lite" in n:
+        return False
     return True
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_model_candidates(_api_key_hash, _v=3):
+def get_model_candidates(_api_key_hash, _v=4):
     """Pregunta a la API qué modelos están disponibles para esta clave y los
     ordena por versión (más alta primero). Si la consulta falla, cae de
     vuelta a alias "-latest" que Google mantiene apuntando al modelo vigente,
@@ -171,11 +176,12 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
         st.session_state["persisted_working_model"] = load_working_model()
     persisted_model, persisted_date = st.session_state["persisted_working_model"]
 
+    candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
+
     preferred = st.session_state.get("working_model")
-    if not preferred and persisted_date == today:
+    if not preferred and persisted_date == today and persisted_model in candidates:
         preferred = persisted_model
 
-    candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
     ordered = ([preferred] if preferred else []) + [c for c in candidates if c != preferred]
     ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
 
@@ -185,7 +191,7 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
             t_attempt = time.perf_counter()
             try:
                 model = genai.GenerativeModel(model_name)
-                response = model.generate_content(parts, request_options={"timeout": 12})
+                response = model.generate_content(parts, request_options={"timeout": 25})
                 if response and response.text:
                     attempts.append((model_name, time.perf_counter() - t_attempt, "ok"))
                     st.session_state["working_model"] = model_name
