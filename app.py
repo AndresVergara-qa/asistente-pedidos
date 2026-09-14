@@ -722,7 +722,17 @@ with tab_ventas:
                         recalled_rate = sku_prices.get(sku_val, 0.0)
                         if recalled_rate == 0.0:
                             recalled_rate = prod_prices.get(str(actual_pname).upper(), 0.0)
-                        final_rate = recalled_rate if recalled_rate > 0.0 else extracted_rate
+
+                        if extracted_rate > 0.0:
+                            # El pedido trae un precio explícito — eso siempre manda.
+                            final_rate = extracted_rate
+                        elif qb_connected:
+                            # Con QuickBooks conectado, su historial real es la fuente de
+                            # verdad (más confiable/actualizada que la memoria local en
+                            # Sheets) — se intenta abajo; si no encuentra nada, cae a Sheets.
+                            final_rate = 0.0
+                        else:
+                            final_rate = recalled_rate
 
                         row_idx = len(results)
                         results.append({
@@ -733,25 +743,27 @@ with tab_ventas:
                             "Qty": item.get("qty", 1),
                             "Rate": final_rate,
                         })
-                        if final_rate == 0.0 and qb_connected:
-                            precios_pendientes.append((row_idx, actual_pname, sku_val))
+                        if extracted_rate == 0.0 and qb_connected:
+                            precios_pendientes.append((row_idx, actual_pname, sku_val, recalled_rate))
                     timing["3_memoria_y_matching"] = time.perf_counter() - t_antes_memoria
 
                     t_antes_precios_qb = time.perf_counter()
                     if precios_pendientes:
                         with st.spinner(f"Consultando en QuickBooks el último precio vendido de {len(precios_pendientes)} producto(s)..."):
-                            for row_idx, pname, sku_val in precios_pendientes:
+                            for row_idx, pname, sku_val, recalled_rate in precios_pendientes:
                                 try:
                                     item_id = qb_client._find_item_id(pname, sku_val)
-                                    if not item_id:
-                                        continue
-                                    sugerido, nota = qb_client.suggest_price(item_id, customer_id=customer_id_actual)
+                                    sugerido, nota = qb_client.suggest_price(item_id, customer_id=customer_id_actual) if item_id else (None, None)
                                     if sugerido:
                                         results[row_idx]["Rate"] = sugerido
                                         if nota:
                                             precio_notas.append(f"**{pname}**: {nota}")
+                                    elif recalled_rate > 0.0:
+                                        results[row_idx]["Rate"] = recalled_rate
+                                        precio_notas.append(f"**{pname}**: Sin historial en QuickBooks; se usó el precio guardado localmente (Sheets): **${recalled_rate:.2f}**.")
                                 except Exception:
-                                    continue  # si falla la consulta de precio, se deja en 0 para revisión manual
+                                    if recalled_rate > 0.0:
+                                        results[row_idx]["Rate"] = recalled_rate  # QuickBooks falló, cae a la memoria local
                     timing["4_precios_desde_qb"] = time.perf_counter() - t_antes_precios_qb
                     timing["4_precios_lineas_consultadas"] = len(precios_pendientes)
 
