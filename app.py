@@ -102,7 +102,7 @@ def _is_usable_model(model_name):
     if "gemini" not in n:
         return False
     if any(bad in n for bad in [
-        "embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm", "vision",
+        "embedding", "aqa", "imagen-", "tts", "image", "learnlm", "vision",
         "transcribe", "audio", "live", "native-audio", "computer-use", "robotics",
     ]):
         return False
@@ -114,7 +114,7 @@ def _is_usable_model(model_name):
     return True
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_model_candidates(_api_key_hash, _v=5):
+def get_model_candidates(_api_key_hash, _v=6):
     """Pregunta a la API qué modelos están disponibles para esta clave y los
     ordena por versión (más alta primero). Si la consulta falla, cae de
     vuelta a alias "-latest" que Google mantiene apuntando al modelo vigente,
