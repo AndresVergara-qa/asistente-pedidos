@@ -101,7 +101,10 @@ def _is_usable_model(model_name):
     # para catálogos grandes), embeddings, generación de imagen, TTS, etc.
     if "gemini" not in n:
         return False
-    if any(bad in n for bad in ["embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm", "vision"]):
+    if any(bad in n for bad in [
+        "embedding", "aqa", "imagen-", "tts", "image-generation", "learnlm", "vision",
+        "transcribe", "audio", "live", "native-audio", "computer-use", "robotics",
+    ]):
         return False
     # Las variantes "-lite" leen peor las imágenes (se comprobó que confunden
     # formatos de producto, ej. "12pk cans" vs "2lts x8") — la precisión del
@@ -111,7 +114,7 @@ def _is_usable_model(model_name):
     return True
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_model_candidates(_api_key_hash, _v=4):
+def get_model_candidates(_api_key_hash, _v=5):
     """Pregunta a la API qué modelos están disponibles para esta clave y los
     ordena por versión (más alta primero). Si la consulta falla, cae de
     vuelta a alias "-latest" que Google mantiene apuntando al modelo vigente,
