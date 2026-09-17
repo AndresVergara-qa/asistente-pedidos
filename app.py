@@ -397,16 +397,26 @@ def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalo
     return actual_pname, sku_val, desc_val, estado
 
 
-def sync_edited_rows(edited_df, editor_key, qb_df, prod_col, sku_col, desc_col, fallback_desc_col=None):
+def sync_edited_rows(edited_df, editor_key, base_session_key, qb_df, prod_col, sku_col, desc_col, fallback_desc_col=None):
     """Cuando el usuario cambia el Producto o el SKU a mano en la tabla
     (el desplegable buscable estilo QuickBooks), esto vuelve a llenar el
-    resto de la fila (SKU/Producto/Description/Estado) desde el catálogo
-    para que no quede desincronizada — igual que hace QuickBooks al elegir
-    un ítem del desplegable."""
+    resto de la fila (SKU/Description/Estado) desde el catálogo para que no
+    quede desincronizada — igual que hace QuickBooks al elegir un ítem del
+    desplegable. También lo persiste en la tabla base (session_state) y
+    fuerza un rerun, porque si no, la grilla sigue mostrando el valor viejo
+    en las columnas que el usuario no tocó directamente (Streamlit solo
+    refresca visualmente la celda que el usuario editó, no las demás)."""
     diff = st.session_state.get(editor_key, {})
     changes = dict(diff.get("edited_rows", {}))
-    for i, added in enumerate(diff.get("added_rows", [])):
-        changes[len(edited_df) - len(diff.get("added_rows", [])) + i] = added
+    added_rows = diff.get("added_rows", [])
+    for i, added in enumerate(added_rows):
+        changes[len(edited_df) - len(added_rows) + i] = added
+
+    if not changes:
+        return edited_df
+
+    base_df = st.session_state.get(base_session_key)
+    tocó_base = False
 
     for row_idx, changed_cols in changes.items():
         if row_idx not in edited_df.index:
@@ -425,10 +435,37 @@ def sync_edited_rows(edited_df, editor_key, qb_df, prod_col, sku_col, desc_col, 
             desc_val = clean_val(match[desc_col]) if desc_col else ""
             if not desc_val and fallback_desc_col:
                 desc_val = clean_val(match[fallback_desc_col])
-            edited_df.at[row_idx, "Product/service"] = match[prod_col]
-            edited_df.at[row_idx, "SKU"] = clean_val(match[sku_col]) if sku_col else ""
+            sku_val = clean_val(match[sku_col]) if sku_col else ""
+            name_val = match[prod_col]
+            estado_val = "✅ SKU exacto" if "SKU" in changed_cols else "✅ Exacto"
+
+            edited_df.at[row_idx, "SKU"] = sku_val
             edited_df.at[row_idx, "Description"] = desc_val
-            edited_df.at[row_idx, "Estado"] = "✅ SKU exacto" if "SKU" in changed_cols else "✅ Exacto"
+            edited_df.at[row_idx, "Estado"] = estado_val
+            if "SKU" in changed_cols:
+                edited_df.at[row_idx, "Product/service"] = name_val
+
+            if base_df is not None and row_idx in base_df.index:
+                # Solo marcar cambio (y por lo tanto forzar rerun) si algo realmente
+                # es distinto — si no, con el mismo diff ya aplicado de una corrida
+                # anterior, entraríamos en un loop infinito de reruns.
+                ya_igual = (
+                    str(base_df.at[row_idx, "SKU"]) == str(sku_val)
+                    and str(base_df.at[row_idx, "Description"]) == str(desc_val)
+                    and str(base_df.at[row_idx, "Estado"]) == str(estado_val)
+                    and ("SKU" not in changed_cols or str(base_df.at[row_idx, "Product/service"]) == str(name_val))
+                )
+                if not ya_igual:
+                    base_df.at[row_idx, "SKU"] = sku_val
+                    base_df.at[row_idx, "Description"] = desc_val
+                    base_df.at[row_idx, "Estado"] = estado_val
+                    if "SKU" in changed_cols:
+                        base_df.at[row_idx, "Product/service"] = name_val
+                    tocó_base = True
+
+    if tocó_base:
+        st.session_state[base_session_key] = base_df
+        st.rerun()
 
     return edited_df
 
@@ -870,7 +907,7 @@ with tab_ventas:
             width="stretch", hide_index=True,
             key="ventas_editor",
         )
-        edited_df = sync_edited_rows(edited_df, "ventas_editor", qb_df, prod_col, sku_col, sales_desc_col)
+        edited_df = sync_edited_rows(edited_df, "ventas_editor", "res_df", qb_df, prod_col, sku_col, sales_desc_col)
 
         if st.button("💾 Aprender y Guardar Precios"):
             save_price_memory(cliente_actual.strip(), edited_df)
@@ -1071,7 +1108,7 @@ with tab_compras:
             width="stretch", hide_index=True,
             key="compras_editor",
         )
-        edited_compras_df = sync_edited_rows(edited_compras_df, "compras_editor", qb_df, prod_col, sku_col, purchase_desc_col, fallback_desc_col=sales_desc_col)
+        edited_compras_df = sync_edited_rows(edited_compras_df, "compras_editor", "res_compras", qb_df, prod_col, sku_col, purchase_desc_col, fallback_desc_col=sales_desc_col)
 
         st.divider()
         st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
