@@ -397,6 +397,42 @@ def resolve_item(qb_df, prod_col, sku_col, desc_col, p_name, sku_hint="", catalo
     return actual_pname, sku_val, desc_val, estado
 
 
+def sync_edited_rows(edited_df, editor_key, qb_df, prod_col, sku_col, desc_col, fallback_desc_col=None):
+    """Cuando el usuario cambia el Producto o el SKU a mano en la tabla
+    (el desplegable buscable estilo QuickBooks), esto vuelve a llenar el
+    resto de la fila (SKU/Producto/Description/Estado) desde el catálogo
+    para que no quede desincronizada — igual que hace QuickBooks al elegir
+    un ítem del desplegable."""
+    diff = st.session_state.get(editor_key, {})
+    changes = dict(diff.get("edited_rows", {}))
+    for i, added in enumerate(diff.get("added_rows", [])):
+        changes[len(edited_df) - len(diff.get("added_rows", [])) + i] = added
+
+    for row_idx, changed_cols in changes.items():
+        if row_idx not in edited_df.index:
+            continue
+        match = None
+        if "Product/service" in changed_cols and changed_cols["Product/service"]:
+            m = qb_df[qb_df[prod_col].astype(str) == str(changed_cols["Product/service"])]
+            if not m.empty:
+                match = m.iloc[0]
+        elif "SKU" in changed_cols and sku_col and changed_cols["SKU"]:
+            m = qb_df[qb_df[sku_col].astype(str).str.strip() == str(changed_cols["SKU"]).strip()]
+            if not m.empty:
+                match = m.iloc[0]
+
+        if match is not None:
+            desc_val = clean_val(match[desc_col]) if desc_col else ""
+            if not desc_val and fallback_desc_col:
+                desc_val = clean_val(match[fallback_desc_col])
+            edited_df.at[row_idx, "Product/service"] = match[prod_col]
+            edited_df.at[row_idx, "SKU"] = clean_val(match[sku_col]) if sku_col else ""
+            edited_df.at[row_idx, "Description"] = desc_val
+            edited_df.at[row_idx, "Estado"] = "✅ SKU exacto" if "SKU" in changed_cols else "✅ Exacto"
+
+    return edited_df
+
+
 # =========================================================
 # BARRA LATERAL
 # =========================================================
@@ -816,14 +852,25 @@ with tab_ventas:
             st.caption(f"Modelo usado: {st.session_state.get('ventas_model_used', '—')}")
             st.code(st.session_state.get("ventas_raw_response", ""), language="json")
 
+        # Las opciones deben incluir también los valores ya presentes en la tabla
+        # (ej. un "sin_match" con el texto que leyó la IA), si no Streamlit rechaza
+        # el desplegable por tener un valor fuera de la lista.
+        prod_options_ventas = sorted(set(qb_df[prod_col].dropna().astype(str)) | set(st.session_state["res_df"]["Product/service"].astype(str))) if prod_col else []
+        sku_options_ventas = sorted((set(clean_val(v) for v in qb_df[sku_col].dropna()) | set(st.session_state["res_df"]["SKU"].astype(str))) - {""}) if sku_col else []
+
         edited_df = st.data_editor(
             st.session_state["res_df"],
             column_config={
+                "Product/service": st.column_config.SelectboxColumn("Product/service", options=prod_options_ventas, width="large"),
+                "SKU": st.column_config.SelectboxColumn("SKU", options=sku_options_ventas),
                 "Rate": st.column_config.NumberColumn("Rate ($)", format="$%.2f", min_value=0.0),
                 "Estado": st.column_config.TextColumn("Estado", disabled=True),
             },
+            num_rows="dynamic",
             width="stretch", hide_index=True,
+            key="ventas_editor",
         )
+        edited_df = sync_edited_rows(edited_df, "ventas_editor", qb_df, prod_col, sku_col, sales_desc_col)
 
         if st.button("💾 Aprender y Guardar Precios"):
             save_price_memory(cliente_actual.strip(), edited_df)
@@ -1009,14 +1056,22 @@ with tab_compras:
             st.code(st.session_state.get("compras_raw_response", ""), language="json")
 
         st.subheader("🔍 Verificación y Edición de Compras (Bills)")
+        prod_options_compras = sorted(set(qb_df[prod_col].dropna().astype(str)) | set(st.session_state["res_compras"]["Product/service"].astype(str))) if prod_col else []
+        sku_options_compras = sorted((set(clean_val(v) for v in qb_df[sku_col].dropna()) | set(st.session_state["res_compras"]["SKU"].astype(str))) - {""}) if sku_col else []
+
         edited_compras_df = st.data_editor(
             st.session_state["res_compras"],
             column_config={
+                "Product/service": st.column_config.SelectboxColumn("Product/service", options=prod_options_compras, width="large"),
+                "SKU": st.column_config.SelectboxColumn("SKU", options=sku_options_compras),
                 "Cost": st.column_config.NumberColumn("Cost ($)", format="$%.2f", min_value=0.0),
                 "Estado": st.column_config.TextColumn("Estado", disabled=True),
             },
-            width="stretch", hide_index=True
+            num_rows="dynamic",
+            width="stretch", hide_index=True,
+            key="compras_editor",
         )
+        edited_compras_df = sync_edited_rows(edited_compras_df, "compras_editor", qb_df, prod_col, sku_col, purchase_desc_col, fallback_desc_col=sales_desc_col)
 
         st.divider()
         st.subheader("📋 LISTO PARA QUICKBOOKS (BILLS)")
