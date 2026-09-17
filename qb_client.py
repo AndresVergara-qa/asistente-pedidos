@@ -288,7 +288,9 @@ def get_last_price(item_id, customer_id=None, max_results=50):
     """Busca el precio (UnitPrice) más reciente al que se vendió item_id,
     revisando Invoices y Sales Receipts (ventas ya facturadas/cobradas, no
     Estimates). Si customer_id viene dado, solo mira ventas a ese cliente.
-    Devuelve {"rate":, "date":, "doc_type":} o None si no hay historial."""
+    Devuelve {"rate":, "date":, "doc_type":, "customer":} o None si no hay
+    historial. "customer" es el nombre del cliente de esa venta (QuickBooks
+    ya lo trae en la transacción, no hace falta una consulta aparte)."""
     best = None
     for entity in ("Invoice", "SalesReceipt"):
         select = f"SELECT * FROM {entity}"
@@ -306,7 +308,12 @@ def get_last_price(item_id, customer_id=None, max_results=50):
                 continue
             date = txn.get("TxnDate", "")
             if best is None or date > best["date"]:
-                best = {"rate": float(match_rate), "date": date, "doc_type": entity}
+                best = {
+                    "rate": float(match_rate),
+                    "date": date,
+                    "doc_type": entity,
+                    "customer": txn.get("CustomerRef", {}).get("name", ""),
+                }
             break  # ya es el más reciente de este tipo de documento (viene ORDERBY DESC)
     return best
 
@@ -325,14 +332,16 @@ def suggest_price(item_id, customer_id=None, diff_threshold_pct=8):
         if any_price and any_price["date"] > cust_price["date"] and cust_price["rate"] > 0:
             diff_pct = abs(any_price["rate"] - cust_price["rate"]) / cust_price["rate"] * 100
             if diff_pct >= diff_threshold_pct:
+                otro_cliente = any_price.get("customer") or "otro cliente"
                 note += (
-                    f" ⚠️ Venta más reciente a otro cliente: ${any_price['rate']:.2f} ({any_price['date']}) "
+                    f" ⚠️ Venta más reciente a **{otro_cliente}**: ${any_price['rate']:.2f} ({any_price['date']}) "
                     f"— {diff_pct:.0f}% de diferencia, revisa si cambió el precio."
                 )
         return cust_price["rate"], note
     if any_price:
+        otro_cliente = any_price.get("customer") or "otro cliente"
         note = (
-            f"Sin historial con este cliente; se usó el último precio vendido (a otro cliente): "
+            f"Sin historial con este cliente; se usó el último precio vendido a **{otro_cliente}**: "
             f"**${any_price['rate']:.2f}** ({any_price['date']})."
         )
         return any_price["rate"], note
