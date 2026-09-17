@@ -756,6 +756,9 @@ with tab_ventas:
                 if raw_text is None:
                     st.error(f"❌ Error de conexión: {error}")
                     st.session_state["timing_ventas"] = timing
+                    with st.expander(f"⏱️ Modelos probados ({len(timing['gemini_intentos'])} intento(s), todos fallaron)"):
+                        for modelo, segundos, resultado in timing["gemini_intentos"]:
+                            st.caption(f"↳ {modelo}: {segundos:.2f}s — {resultado}")
                     st.stop()
 
                 try:
