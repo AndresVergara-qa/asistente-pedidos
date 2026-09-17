@@ -439,28 +439,31 @@ def sync_edited_rows(edited_df, editor_key, base_session_key, qb_df, prod_col, s
             name_val = match[prod_col]
             estado_val = "✅ SKU exacto" if "SKU" in changed_cols else "✅ Exacto"
 
+            edited_df.at[row_idx, "Product/service"] = name_val
             edited_df.at[row_idx, "SKU"] = sku_val
             edited_df.at[row_idx, "Description"] = desc_val
             edited_df.at[row_idx, "Estado"] = estado_val
-            if "SKU" in changed_cols:
-                edited_df.at[row_idx, "Product/service"] = name_val
 
             if base_df is not None and row_idx in base_df.index:
                 # Solo marcar cambio (y por lo tanto forzar rerun) si algo realmente
                 # es distinto — si no, con el mismo diff ya aplicado de una corrida
                 # anterior, entraríamos en un loop infinito de reruns.
+                # IMPORTANTE: el nombre del producto SIEMPRE se reescribe en la base
+                # (no solo cuando cambió el SKU) — en modo num_rows="dynamic",
+                # Streamlit NO preserva la edición de "Product/service" tras un
+                # rerun forzado por nosotros, así que hay que fijarlo aquí también
+                # o el nombre "rebota" de vuelta al original.
                 ya_igual = (
-                    str(base_df.at[row_idx, "SKU"]) == str(sku_val)
+                    str(base_df.at[row_idx, "Product/service"]) == str(name_val)
+                    and str(base_df.at[row_idx, "SKU"]) == str(sku_val)
                     and str(base_df.at[row_idx, "Description"]) == str(desc_val)
                     and str(base_df.at[row_idx, "Estado"]) == str(estado_val)
-                    and ("SKU" not in changed_cols or str(base_df.at[row_idx, "Product/service"]) == str(name_val))
                 )
                 if not ya_igual:
+                    base_df.at[row_idx, "Product/service"] = name_val
                     base_df.at[row_idx, "SKU"] = sku_val
                     base_df.at[row_idx, "Description"] = desc_val
                     base_df.at[row_idx, "Estado"] = estado_val
-                    if "SKU" in changed_cols:
-                        base_df.at[row_idx, "Product/service"] = name_val
                     tocó_base = True
 
     if tocó_base:
