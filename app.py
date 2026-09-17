@@ -364,6 +364,84 @@ def find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint="", catalog_norm=
     return qb_df.loc[best_idx], "aproximado", None
 
 
+def get_top_candidates(qb_df, prod_col, sku_col, p_name, sku_hint="", catalog_norm=None, top_n=10):
+    """Devuelve hasta top_n filas del catálogo más parecidas a p_name (por
+    similitud de texto), para mandarle a la IA solo esas en vez del catálogo
+    completo. Prioriza una coincidencia exacta de SKU si sku_hint viene.
+    Sigue comparando contra el catálogo COMPLETO — no se recorta nada, solo
+    se elige qué mostrarle a la IA."""
+    p_norm = normalize(p_name)
+    sku_norm = normalize(sku_hint)
+    candidates = []
+    seen = set()
+
+    if sku_norm and sku_col:
+        m = qb_df[qb_df[sku_col].astype(str).str.strip().str.upper() == sku_norm]
+        for idx in m.index:
+            candidates.append(qb_df.loc[idx])
+            seen.add(idx)
+
+    if p_norm:
+        if catalog_norm is None:
+            catalog_norm = build_catalog_index(qb_df, prod_col)
+        scored = []
+        for idx, cand in catalog_norm.items():
+            if idx in seen:
+                continue
+            score = difflib.SequenceMatcher(None, p_norm, cand).ratio()
+            if p_norm in cand or cand in p_norm:
+                score = max(score, 0.85)
+            scored.append((score, idx))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        for score, idx in scored[: max(0, top_n - len(candidates))]:
+            if score > 0.35:  # sin un mínimo de parecido, no vale la pena mostrarlo
+                candidates.append(qb_df.loc[idx])
+
+    return candidates[:top_n]
+
+
+def build_disambiguation_prompt(raw_items, candidates_per_item, prod_col, sku_col, desc_col):
+    """Arma el prompt del paso 2 (desambiguación): para cada producto leído
+    del pedido, le muestra a la IA solo sus candidatos del catálogo (no el
+    catálogo completo) para que elija cuál es el correcto."""
+    bloques = []
+    for i, (ritem, cands) in enumerate(zip(raw_items, candidates_per_item), start=1):
+        if cands:
+            cand_lines = "\n".join(
+                f"   - SKU: {clean_val(c[sku_col]) if sku_col else '(sin SKU)'} | Nombre: {c[prod_col]} | Descripción: {clean_val(c[desc_col]) if desc_col else ''}"
+                for c in cands
+            )
+        else:
+            cand_lines = "   (no se encontró ningún candidato parecido en el catálogo)"
+        texto_leido = str(ritem.get("producto_leido", "")).strip()
+        bloques.append(f"{i}. Producto del pedido: \"{texto_leido}\"\n   Candidatos del catálogo:\n{cand_lines}")
+
+    return f"""
+    Para cada producto de un pedido, elige CUÁL candidato del catálogo de QuickBooks es el correcto
+    (o ninguno, si de verdad no corresponde a ese producto).
+
+    REGLAS DE PRODUCTOS:
+    1. JACK DANIEL'S VARIETY PACK -> "JACK DANIEL'S" (CANS VARIETY PACK 2X12 OZ).
+    2. CRUSH: Grape = "Crush Grape". Strawberry = "Crush STRAWBERRY 12pk x2".
+    3. COCA-COLA ORIGINAL -> "COCA COLA 12PK".
+    4. PRIME ICE POP -> "Prime Ice Pop 12/16.9 OZ BTL".
+
+    IMPORTANTE — PRECISIÓN: los candidatos suelen incluir variantes muy parecidas de un mismo
+    producto (ej. "Chick Peas" vs "Organic Chick Peas", "Garlic Powder" vs "Garlic Powder 8oz").
+    Compara letra por letra (nombre Y descripción) antes de elegir. Si ningún candidato es
+    realmente el producto correcto, responde sku_elegido: null.
+
+    PRODUCTOS Y SUS CANDIDATOS:
+    {chr(10).join(bloques)}
+
+    FORMATO DE SALIDA (JSON ESTRICTO, un objeto por producto EN EL MISMO ORDEN de arriba,
+    SOLO DEVUELVE EL ARREGLO):
+    [
+      {{"indice": 1, "sku_elegido": "SKU exacto del candidato elegido, o null", "producto_elegido": "nombre exacto del candidato elegido, o null"}}
+    ]
+    """
+
+
 ESTADO_LABELS = {
     "sku": "✅ SKU exacto",
     "exacto": "✅ Exacto",
@@ -695,82 +773,114 @@ with tab_ventas:
                 timing = {}
                 genai.configure(api_key=DEFAULT_API_KEY.strip())
 
-                cols_qb = [c for c in [prod_col, sku_col, sales_desc_col] if c is not None]
-                catalog_csv = qb_df[cols_qb].dropna(subset=[prod_col]).to_csv(index=False)
-
                 measures_csv = ""
                 if measures_df is not None:
                     m_cols = [c for c in measures_df.columns if any(k in str(c).upper() for k in ["PROD", "PREST", "BOX", "PALLET", "MEDIDA"])]
                     measures_csv = measures_df[m_cols].dropna(how="all").to_csv(index=False) if m_cols else measures_df.to_csv(index=False)
-                timing["1_armar_catalogo_csv"] = time.perf_counter() - t_inicio
-                timing["catalogo_chars_enviados"] = len(catalog_csv)
+                timing["1_preparar_medidas"] = time.perf_counter() - t_inicio
 
-                prompt = f"""
-                Eres un experto en logística y facturación en QuickBooks para 'Convenient Distributor'.
-                OBJETIVO: Extrae productos, calcula cantidades (Qty) y extrae el precio unitario (Rate)
-                basándote en la información proporcionada (imagen o texto), el catálogo y la tabla de medidas.
+                # =====================================================
+                # PASO 1: leer el pedido SIN el catálogo (prompt chico, rápido)
+                # =====================================================
+                prompt_extraccion = f"""
+                Eres un experto leyendo pedidos de productos (imagen o texto de WhatsApp) para
+                'Convenient Distributor'. Lee el pedido y extrae CADA producto mencionado, con su
+                cantidad (Qty) y precio unitario (Rate) si aparece.
 
-                REGLAS DE PRODUCTOS:
-                1. JACK DANIEL'S VARIETY PACK -> "JACK DANIEL'S" (CANS VARIETY PACK 2X12 OZ).
-                2. CRUSH: Grape = "Crush Grape". Strawberry = "Crush STRAWBERRY 12pk x2".
-                3. COCA-COLA ORIGINAL -> "COCA COLA 12PK".
-                4. PRIME ICE POP -> "Prime Ice Pop 12/16.9 OZ BTL".
+                Escribe el nombre del producto tal como lo entiendes del pedido — NO intentes adivinar
+                el nombre exacto de ningún catálogo, solo describe qué producto es lo más claro posible.
 
-                IMPORTANTE — PRECISIÓN: el catálogo suele tener variantes muy parecidas de un mismo
-                producto (ej. "Chick Peas" vs "Organic Chick Peas", "Green Peas" vs "Green Split Peas"
-                vs "Tender Sweet Peas", "Garlic Powder" vs "Garlic Powder 8oz"). Compara letra por letra
-                contra el catálogo antes de responder y elige la fila que más se parezca al texto del
-                pedido, no la primera que se te ocurra.
-
-                INSTRUCCIÓN DE PRECIO (RATE): busca en el pedido si el producto tiene un precio unitario
-                asignado. Si aparece, extráelo en formato numérico (ej. 15.99). Si no aparece, coloca 0.0.
-
-                CATÁLOGO QUICKBOOKS:
-                {catalog_csv}
-
-                TABLA DE MEDIDAS (para conversiones de pallets/cajas):
+                TABLA DE MEDIDAS (para convertir pallets/cajas a unidades si hace falta):
                 {measures_csv}
+
+                INSTRUCCIÓN DE PRECIO (RATE): si el pedido trae un precio unitario, extráelo en formato
+                numérico (ej. 15.99). Si no aparece, coloca 0.0.
 
                 FORMATO DE SALIDA (JSON ESTRICTO. SOLO DEVUELVE EL ARREGLO JSON):
                 [
                   {{
                     "texto_original": "texto detectado",
-                    "producto_qb": "Nombre EXACTO tal cual aparece en el catálogo",
-                    "sku_hint": "SKU EXACTO del catálogo para ese producto, si lo puedes identificar",
+                    "producto_leido": "el producto tal como lo entendiste, en tus palabras",
                     "qty": 50,
                     "rate": 15.99
                   }}
                 ]
                 """
 
-                ai_input = [prompt]
+                ai_input = [prompt_extraccion]
                 if uploaded_image:
                     ai_input.append(Image.open(uploaded_image))
                 if pasted_text.strip():
                     ai_input.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
 
-                t_antes_gemini = time.perf_counter()
-                raw_text, used_model, error = call_gemini(ai_input)
-                timing["2_llamada_gemini"] = time.perf_counter() - t_antes_gemini
-                timing["gemini_intentos"] = st.session_state.get("last_gemini_attempts", [])
+                t_antes_gemini1 = time.perf_counter()
+                raw_text, used_model, error = call_gemini(ai_input, spinner_text="🤖 Leyendo el pedido...")
+                timing["2a_extraccion_ia"] = time.perf_counter() - t_antes_gemini1
+                timing["gemini_intentos_extraccion"] = st.session_state.get("last_gemini_attempts", [])
                 if raw_text is None:
-                    st.error(f"❌ Error de conexión: {error}")
+                    st.error(f"❌ Error de conexión (leyendo el pedido): {error}")
                     st.session_state["timing_ventas"] = timing
-                    with st.expander(f"⏱️ Modelos probados ({len(timing['gemini_intentos'])} intento(s), todos fallaron)"):
-                        for modelo, segundos, resultado in timing["gemini_intentos"]:
+                    with st.expander(f"⏱️ Modelos probados ({len(timing['gemini_intentos_extraccion'])} intento(s), todos fallaron)"):
+                        for modelo, segundos, resultado in timing["gemini_intentos_extraccion"]:
                             st.caption(f"↳ {modelo}: {segundos:.2f}s — {resultado}")
                     st.stop()
 
                 try:
-                    items = parse_json_response(raw_text)
+                    raw_items = parse_json_response(raw_text)
                 except json.JSONDecodeError:
-                    st.error("❌ La IA no devolvió un JSON válido. Mira la respuesta cruda abajo para depurar.")
+                    st.error("❌ La IA no devolvió un JSON válido al leer el pedido. Mira la respuesta cruda abajo para depurar.")
                     st.code(raw_text, language="text")
                     st.session_state["timing_ventas"] = timing
                     st.stop()
 
                 st.session_state["ventas_raw_response"] = raw_text
                 st.session_state["ventas_model_used"] = used_model
+
+                # =====================================================
+                # PASO 2a: candidatos locales por producto (Python, sin IA — sigue
+                # comparando contra el catálogo COMPLETO, solo elige qué mostrarle a la IA)
+                # =====================================================
+                t_antes_candidatos = time.perf_counter()
+                catalog_norm_idx = build_catalog_index(qb_df, prod_col)
+                candidates_per_item = [
+                    get_top_candidates(qb_df, prod_col, sku_col, str(ri.get("producto_leido", "")).strip(), catalog_norm=catalog_norm_idx)
+                    for ri in raw_items
+                ]
+                timing["2b_candidatos_locales"] = time.perf_counter() - t_antes_candidatos
+
+                # =====================================================
+                # PASO 2b: la IA elige, por producto, cuál candidato es el correcto
+                # (prompt chico: solo los candidatos de este pedido, no el catálogo entero)
+                # =====================================================
+                elecciones = {}
+                t_antes_gemini2 = time.perf_counter()
+                if raw_items:
+                    prompt_desambiguacion = build_disambiguation_prompt(raw_items, candidates_per_item, prod_col, sku_col, sales_desc_col)
+                    raw_text2, used_model2, error2 = call_gemini([prompt_desambiguacion], spinner_text="🔎 Confirmando productos contra el catálogo...")
+                    timing["gemini_intentos_desambiguacion"] = st.session_state.get("last_gemini_attempts", [])
+                    if raw_text2 is None:
+                        st.warning(f"⚠️ No se pudo confirmar contra el catálogo ({error2}); se usa el matching local automático como respaldo.")
+                    else:
+                        try:
+                            for e in parse_json_response(raw_text2):
+                                elecciones[e.get("indice")] = e
+                        except json.JSONDecodeError:
+                            st.warning("⚠️ La IA no devolvió JSON válido al confirmar productos; se usa el matching local automático como respaldo.")
+                timing["2c_desambiguacion_ia"] = time.perf_counter() - t_antes_gemini2
+
+                # Se arma "items" con la misma forma que antes, para no tocar el resto del
+                # flujo (memoria de precios, matching final, etc.) — si la IA no confirmó un
+                # producto, se deja el texto leído para que el matching local (fuzzy) lo intente.
+                items = []
+                for i, ri in enumerate(raw_items, start=1):
+                    eleccion = elecciones.get(i, {})
+                    items.append({
+                        "texto_original": ri.get("texto_original", ""),
+                        "producto_qb": eleccion.get("producto_elegido") or ri.get("producto_leido", ""),
+                        "sku_hint": eleccion.get("sku_elegido") or "",
+                        "qty": ri.get("qty", 1),
+                        "rate": ri.get("rate", 0.0),
+                    })
 
                 t_antes_memoria = time.perf_counter()
                 with st.spinner("💰 Consultando Google Sheets y precios históricos..."):
@@ -882,10 +992,13 @@ with tab_ventas:
         timing = st.session_state.get("timing_ventas", {})
         if timing:
             with st.expander(f"⏱️ Tiempos de este procesamiento (total: {timing.get('total', 0):.1f}s)"):
-                st.write(f"1. Armar catálogo para enviarle a la IA: **{timing.get('1_armar_catalogo_csv', 0):.2f}s** "
-                         f"({timing.get('catalogo_chars_enviados', 0):,} caracteres enviados)")
-                st.write(f"2. Llamada a Gemini (IA): **{timing.get('2_llamada_gemini', 0):.2f}s**")
-                for modelo, segundos, resultado in timing.get("gemini_intentos", []):
+                st.write(f"1. Preparar tabla de medidas: **{timing.get('1_preparar_medidas', 0):.2f}s**")
+                st.write(f"2a. Leer el pedido (IA, sin catálogo): **{timing.get('2a_extraccion_ia', 0):.2f}s**")
+                for modelo, segundos, resultado in timing.get("gemini_intentos_extraccion", []):
+                    st.caption(f"　　↳ {modelo}: {segundos:.2f}s — {resultado}")
+                st.write(f"2b. Buscar candidatos locales por producto: **{timing.get('2b_candidatos_locales', 0):.2f}s**")
+                st.write(f"2c. Confirmar productos contra el catálogo (IA): **{timing.get('2c_desambiguacion_ia', 0):.2f}s**")
+                for modelo, segundos, resultado in timing.get("gemini_intentos_desambiguacion", []):
                     st.caption(f"　　↳ {modelo}: {segundos:.2f}s — {resultado}")
                 st.write(f"3. Memoria de precios (Sheets) + matching contra catálogo: **{timing.get('3_memoria_y_matching', 0):.2f}s**")
                 st.write(f"4. Precios consultados en vivo a QuickBooks: **{timing.get('4_precios_desde_qb', 0):.2f}s** "
