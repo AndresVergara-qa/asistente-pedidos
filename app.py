@@ -862,23 +862,45 @@ with tab_ventas:
                 timing["2b_candidatos_locales"] = time.perf_counter() - t_antes_candidatos
 
                 # =====================================================
-                # PASO 2b: la IA elige, por producto, cuál candidato es el correcto
-                # (prompt chico: solo los candidatos de este pedido, no el catálogo entero)
+                # PASO 2b: la IA elige, por producto, cuál candidato es el correcto.
+                # Se manda en LOTES chicos (no los 36+ productos de una) — cada llamada
+                # es más chica y tiene mucha más chance de responder a tiempo; si un
+                # lote falla, solo se pierde ese lote (no todo el pedido).
                 # =====================================================
+                DISAMBIG_BATCH_SIZE = 8
                 elecciones = {}
+                lotes_fallidos = []
+                todos_los_intentos = []
                 t_antes_gemini2 = time.perf_counter()
-                if raw_items:
-                    prompt_desambiguacion = build_disambiguation_prompt(raw_items, candidates_per_item, prod_col, sku_col, sales_desc_col)
-                    raw_text2, used_model2, error2 = call_gemini([prompt_desambiguacion], spinner_text="🔎 Confirmando productos contra el catálogo...")
-                    timing["gemini_intentos_desambiguacion"] = st.session_state.get("last_gemini_attempts", [])
+                lotes = [
+                    (i, raw_items[i:i + DISAMBIG_BATCH_SIZE], candidates_per_item[i:i + DISAMBIG_BATCH_SIZE])
+                    for i in range(0, len(raw_items), DISAMBIG_BATCH_SIZE)
+                ]
+                for n_lote, (offset, lote_items, lote_candidatos) in enumerate(lotes, start=1):
+                    prompt_desambiguacion = build_disambiguation_prompt(lote_items, lote_candidatos, prod_col, sku_col, sales_desc_col)
+                    raw_text2, used_model2, error2 = call_gemini(
+                        [prompt_desambiguacion],
+                        spinner_text=f"🔎 Confirmando productos contra el catálogo (lote {n_lote}/{len(lotes)})...",
+                    )
+                    todos_los_intentos.extend(st.session_state.get("last_gemini_attempts", []))
                     if raw_text2 is None:
-                        st.warning(f"⚠️ No se pudo confirmar contra el catálogo ({error2}); se usa el matching local automático como respaldo.")
-                    else:
-                        try:
-                            for e in parse_json_response(raw_text2):
-                                elecciones[e.get("indice")] = e
-                        except json.JSONDecodeError:
-                            st.warning("⚠️ La IA no devolvió JSON válido al confirmar productos; se usa el matching local automático como respaldo.")
+                        lotes_fallidos.append(n_lote)
+                        continue
+                    try:
+                        for e in parse_json_response(raw_text2):
+                            idx_local = e.get("indice")
+                            if isinstance(idx_local, int):
+                                elecciones[offset + idx_local] = e  # remapear al índice global del pedido
+                    except json.JSONDecodeError:
+                        lotes_fallidos.append(n_lote)
+
+                if lotes_fallidos:
+                    st.warning(
+                        f"⚠️ {len(lotes_fallidos)} de {len(lotes)} lote(s) de confirmación fallaron "
+                        f"(lote(s) #{', '.join(map(str, lotes_fallidos))}) — esos productos puntuales usan "
+                        f"el matching local automático como respaldo; el resto sí fue confirmado por la IA."
+                    )
+                timing["gemini_intentos_desambiguacion"] = todos_los_intentos
                 timing["2c_desambiguacion_ia"] = time.perf_counter() - t_antes_gemini2
 
                 # Se arma "items" con la misma forma que antes, para no tocar el resto del
