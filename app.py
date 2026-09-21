@@ -721,13 +721,26 @@ elif local_found:
 
 if qb_df is not None:
     cols_upper = {str(c).strip().upper(): c for c in qb_df.columns}
-    prod_col = next((cols_upper[k] for k in ["PRODUCT/SERVICE", "NAME", "PRODUCT/SERVICE NAME", "PRODUCT"] if k in cols_upper), qb_df.columns[0])
-    sku_col = next((cols_upper[k] for k in ["SKU", "ITEM SKU"] if k in cols_upper), None)
+    PROD_COL_CANDIDATES = ["PRODUCT/SERVICE", "NAME", "PRODUCT/SERVICE NAME", "PRODUCT", "PRODUCTO", "NOMBRE", "ITEM", "ITEM NAME", "ARTICULO", "ARTÍCULO"]
+    prod_col_detectado = next((cols_upper[k] for k in PROD_COL_CANDIDATES if k in cols_upper), None)
+    prod_col = prod_col_detectado or qb_df.columns[0]
+    sku_col = next((cols_upper[k] for k in ["SKU", "ITEM SKU", "CÓDIGO", "CODIGO"] if k in cols_upper), None)
     # QuickBooks suele traer columnas de descripción SEPARADAS para Ventas y Compras.
     # Antes usábamos una sola columna para ambas pestañas, lo que hacía que Compras
     # mostrara por error la descripción de Ventas (o viceversa).
-    sales_desc_col = next((cols_upper[k] for k in ["SALES DESCRIPTION", "DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION"] if k in cols_upper), None)
-    purchase_desc_col = next((cols_upper[k] for k in ["PURCHASE DESCRIPTION", "PURCHASE DESC", "DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION"] if k in cols_upper), None)
+    DESC_COL_CANDIDATES = ["SALES DESCRIPTION", "DESCRIPTION", "DESCRP", "MEMO/DESCRIPTION", "DESCRIPCIÓN", "DESCRIPCION", "CATEGORÍA", "CATEGORIA"]
+    sales_desc_col = next((cols_upper[k] for k in DESC_COL_CANDIDATES if k in cols_upper), None)
+    purchase_desc_col = next((cols_upper[k] for k in ["PURCHASE DESCRIPTION", "PURCHASE DESC"] + DESC_COL_CANDIDATES if k in cols_upper), None)
+
+    if prod_col_detectado is None:
+        st.sidebar.error(
+            f"⚠️ No reconocí cuál columna es el nombre del producto en tu catálogo — "
+            f"estoy usando '{prod_col}' (la primera columna) por defecto, probablemente MAL. "
+            f"Columnas disponibles: {', '.join(str(c) for c in qb_df.columns)}. Avísame el nombre "
+            f"correcto para agregarlo a la lista reconocida."
+        )
+    else:
+        st.sidebar.caption(f"📋 Columnas detectadas — Producto: `{prod_col}` · SKU: `{sku_col or '—'}` · Descripción: `{sales_desc_col or '—'}`")
 else:
     prod_col = sku_col = sales_desc_col = purchase_desc_col = None
 
