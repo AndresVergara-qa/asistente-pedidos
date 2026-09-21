@@ -10,6 +10,7 @@ import google.generativeai as genai
 from PIL import Image
 from gsheets_utils import get_gsheets_connection
 import qb_client
+import gemini_cache
 
 # =========================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -159,6 +160,22 @@ def save_working_model(model_name):
         pass  # si no existe la pestaña "app_settings" en el Sheet, simplemente no persiste el atajo
 
 
+def pick_preferred_model(candidates):
+    """Mismo criterio que usa call_gemini para elegir el modelo "de hoy":
+    el que ya funcionó en esta sesión, o el que quedó guardado como exitoso
+    hoy en Sheets (si sigue siendo un modelo permitido) — o None si ninguno
+    aplica (se usaría el primero de la lista de prioridad como default)."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    if "persisted_working_model" not in st.session_state:
+        st.session_state["persisted_working_model"] = load_working_model()
+    persisted_model, persisted_date = st.session_state["persisted_working_model"]
+
+    preferred = st.session_state.get("working_model")
+    if not preferred and persisted_date == today and persisted_model in candidates:
+        preferred = persisted_model
+    return preferred
+
+
 def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artificial..."):
     """
     Intenta los modelos disponibles en orden de prioridad (mejor primero) y
@@ -173,17 +190,8 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
     problemas no bloquee la app por varios minutos.
     """
     last_error = ""
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    if "persisted_working_model" not in st.session_state:
-        st.session_state["persisted_working_model"] = load_working_model()
-    persisted_model, persisted_date = st.session_state["persisted_working_model"]
-
     candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
-
-    preferred = st.session_state.get("working_model")
-    if not preferred and persisted_date == today and persisted_model in candidates:
-        preferred = persisted_model
+    preferred = pick_preferred_model(candidates)
 
     ordered = ([preferred] if preferred else []) + [c for c in candidates if c != preferred]
     ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
@@ -793,137 +801,199 @@ with tab_ventas:
                 timing["1_preparar_medidas"] = time.perf_counter() - t_inicio
 
                 # =====================================================
-                # PASO 1: leer el pedido SIN el catálogo (prompt chico, rápido)
+                # INTENTO CON CACHÉ: catálogo completo pre-cacheado en Gemini —
+                # misma precisión que mandar el catálogo entero, pero solo se
+                # transmite una vez (se reusa mientras el caché esté vigente).
+                # Si falla por cualquier motivo (modelo no soporta caché, venció,
+                # error de red, etc.) cae automáticamente al sistema de 2 pasos.
                 # =====================================================
-                prompt_extraccion = f"""
-                Eres un experto leyendo pedidos de productos (imagen o texto de WhatsApp) para
-                'Convenient Distributor'. Lee el pedido y extrae CADA producto mencionado, con su
-                cantidad (Qty) y precio unitario (Rate) si aparece.
-
-                Escribe el nombre del producto tal como lo entiendes del pedido — NO intentes adivinar
-                el nombre exacto de ningún catálogo, solo describe qué producto es lo más claro posible.
-
-                TABLA DE MEDIDAS (para convertir pallets/cajas a unidades si hace falta):
-                {measures_csv}
-
-                INSTRUCCIÓN DE PRECIO (RATE): si el pedido trae un precio unitario, extráelo en formato
-                numérico (ej. 15.99). Si no aparece, coloca 0.0.
-
-                FORMATO DE SALIDA (JSON ESTRICTO. SOLO DEVUELVE EL ARREGLO JSON):
-                [
-                  {{
-                    "texto_original": "texto detectado",
-                    "producto_leido": "el producto tal como lo entendiste, en tus palabras",
-                    "qty": 50,
-                    "rate": 15.99
-                  }}
-                ]
-                """
-
-                ai_input = [prompt_extraccion]
-                if uploaded_image:
-                    ai_input.append(Image.open(uploaded_image))
-                if pasted_text.strip():
-                    ai_input.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
-
-                t_antes_gemini1 = time.perf_counter()
-                raw_text, used_model, error = call_gemini(ai_input, spinner_text="🤖 Leyendo el pedido...")
-                timing["2a_extraccion_ia"] = time.perf_counter() - t_antes_gemini1
-                timing["gemini_intentos_extraccion"] = st.session_state.get("last_gemini_attempts", [])
-                if raw_text is None:
-                    st.error(f"❌ Error de conexión (leyendo el pedido): {error}")
-                    st.session_state["timing_ventas"] = timing
-                    with st.expander(f"⏱️ Modelos probados ({len(timing['gemini_intentos_extraccion'])} intento(s), todos fallaron)"):
-                        for modelo, segundos, resultado in timing["gemini_intentos_extraccion"]:
-                            st.caption(f"↳ {modelo}: {segundos:.2f}s — {resultado}")
-                    st.stop()
-
+                items = None
+                cache_error = None
+                t_antes_cache = time.perf_counter()
                 try:
-                    raw_items = parse_json_response(raw_text)
-                except json.JSONDecodeError:
-                    st.error("❌ La IA no devolvió un JSON válido al leer el pedido. Mira la respuesta cruda abajo para depurar.")
-                    st.code(raw_text, language="text")
-                    st.session_state["timing_ventas"] = timing
-                    st.stop()
+                    cols_qb = [c for c in [prod_col, sku_col, sales_desc_col] if c is not None]
+                    catalog_csv = qb_df[cols_qb].dropna(subset=[prod_col]).to_csv(index=False)
+                    candidatos_modelo = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
+                    cache_model = pick_preferred_model(candidatos_modelo) or (candidatos_modelo[0] if candidatos_modelo else None)
+                    if not cache_model:
+                        raise RuntimeError("no hay modelos disponibles para cachear")
 
-                st.session_state["ventas_raw_response"] = raw_text
-                st.session_state["ventas_model_used"] = used_model
+                    reglas_producto = """
+                    REGLAS DE PRODUCTOS:
+                    1. JACK DANIEL'S VARIETY PACK -> "JACK DANIEL'S" (CANS VARIETY PACK 2X12 OZ).
+                    2. CRUSH: Grape = "Crush Grape". Strawberry = "Crush STRAWBERRY 12pk x2".
+                    3. COCA-COLA ORIGINAL -> "COCA COLA 12PK".
+                    4. PRIME ICE POP -> "Prime Ice Pop 12/16.9 OZ BTL".
+                    IMPORTANTE — PRECISIÓN: el catálogo suele tener variantes muy parecidas de un mismo
+                    producto (tamaños, sabores, presentaciones). Compara letra por letra contra el
+                    catálogo antes de responder y elige la fila que más se parezca, no la primera opción.
+                    """
+                    cached_content = gemini_cache.get_or_create_cache(catalog_csv, cache_model, reglas_producto)
+                    cached_model_obj = genai.GenerativeModel.from_cached_content(cached_content)
 
-                # =====================================================
-                # PASO 2a: candidatos locales por producto (Python, sin IA — sigue
-                # comparando contra el catálogo COMPLETO, solo elige qué mostrarle a la IA)
-                # =====================================================
-                t_antes_candidatos = time.perf_counter()
-                catalog_norm_idx = build_catalog_index(qb_df, prod_col)
-                candidates_per_item = [
-                    get_top_candidates(qb_df, prod_col, sku_col, str(ri.get("producto_leido", "")).strip(), catalog_norm=catalog_norm_idx)
-                    for ri in raw_items
-                ]
-                timing["2b_candidatos_locales"] = time.perf_counter() - t_antes_candidatos
+                    prompt_pedido = f"""
+                    Extrae CADA producto del pedido (imagen o texto), usando el catálogo que ya tienes.
+                    TABLA DE MEDIDAS (para convertir pallets/cajas a unidades si hace falta):
+                    {measures_csv}
+                    INSTRUCCIÓN DE PRECIO (RATE): si el pedido trae un precio unitario, extráelo en
+                    formato numérico (ej. 15.99). Si no aparece, coloca 0.0.
+                    FORMATO DE SALIDA (JSON ESTRICTO. SOLO EL ARREGLO JSON):
+                    [{{"texto_original": "texto detectado", "producto_qb": "Nombre EXACTO tal cual aparece en el catálogo", "sku_hint": "SKU EXACTO del catálogo", "qty": 50, "rate": 15.99}}]
+                    """
+                    ai_input_cache = [prompt_pedido]
+                    if uploaded_image:
+                        ai_input_cache.append(Image.open(uploaded_image))
+                    if pasted_text.strip():
+                        ai_input_cache.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
 
-                # =====================================================
-                # PASO 2b: la IA elige, por producto, cuál candidato es el correcto.
-                # Se manda en LOTES chicos (no los 36+ productos de una) — cada llamada
-                # es más chica y tiene mucha más chance de responder a tiempo; si un
-                # lote falla, solo se pierde ese lote (no todo el pedido).
-                # =====================================================
-                DISAMBIG_BATCH_SIZE = 8
-                elecciones = {}
-                lotes_fallidos = []
-                todos_los_intentos = []
-                t_antes_gemini2 = time.perf_counter()
-                lotes = [
-                    (i, raw_items[i:i + DISAMBIG_BATCH_SIZE], candidates_per_item[i:i + DISAMBIG_BATCH_SIZE])
-                    for i in range(0, len(raw_items), DISAMBIG_BATCH_SIZE)
-                ]
-                for n_lote, (offset, lote_items, lote_candidatos) in enumerate(lotes, start=1):
-                    prompt_desambiguacion = build_disambiguation_prompt(lote_items, lote_candidatos, prod_col, sku_col, sales_desc_col)
+                    with st.spinner("🤖 Procesando pedido (catálogo completo, vía caché)..."):
+                        response = cached_model_obj.generate_content(ai_input_cache, request_options={"timeout": 45})
+                    raw_text = response.text
+                    items = parse_json_response(raw_text)
+                    st.session_state["ventas_raw_response"] = raw_text
+                    st.session_state["ventas_model_used"] = f"{cache_model} (caché)"
+                    timing["modo"] = "caché (catálogo completo)"
+                except Exception as e:
+                    cache_error = str(e)
+                    items = None
+                timing["0_intento_cache"] = time.perf_counter() - t_antes_cache
 
-                    raw_text2 = None
-                    # Si un lote falla los 5 modelos, se reintenta UNA vez más desde cero antes
-                    # de rendirse — se comprobó que fallos así suelen ser intermitentes (un lote
-                    # igual de chico, segundos después, respondió bien a la primera).
-                    for intento_lote in (1, 2):
-                        spinner_txt = f"🔎 Confirmando productos contra el catálogo (lote {n_lote}/{len(lotes)}"
-                        spinner_txt += f", reintento {intento_lote-1})..." if intento_lote > 1 else ")..."
-                        raw_text2, used_model2, error2 = call_gemini([prompt_desambiguacion], spinner_text=spinner_txt)
-                        todos_los_intentos.extend(st.session_state.get("last_gemini_attempts", []))
-                        if raw_text2 is not None:
-                            break
+                if items is None:
+                  if cache_error:
+                      st.info(f"ℹ️ No se pudo usar el caché del catálogo completo, se usa el sistema de respaldo (2 pasos): {cache_error}")
+                  timing["modo"] = "2 pasos (respaldo)"
+                  # =====================================================
+                  # PASO 1: leer el pedido SIN el catálogo (prompt chico, rápido)
+                  # =====================================================
+                  prompt_extraccion = f"""
+                  Eres un experto leyendo pedidos de productos (imagen o texto de WhatsApp) para
+                  'Convenient Distributor'. Lee el pedido y extrae CADA producto mencionado, con su
+                  cantidad (Qty) y precio unitario (Rate) si aparece.
 
-                    if raw_text2 is None:
-                        lotes_fallidos.append(n_lote)
-                        continue
-                    try:
-                        for e in parse_json_response(raw_text2):
-                            idx_local = e.get("indice")
-                            if isinstance(idx_local, int):
-                                elecciones[offset + idx_local] = e  # remapear al índice global del pedido
-                    except json.JSONDecodeError:
-                        lotes_fallidos.append(n_lote)
+                  Escribe el nombre del producto tal como lo entiendes del pedido — NO intentes adivinar
+                  el nombre exacto de ningún catálogo, solo describe qué producto es lo más claro posible.
 
-                if lotes_fallidos:
-                    st.warning(
-                        f"⚠️ {len(lotes_fallidos)} de {len(lotes)} lote(s) de confirmación fallaron "
-                        f"(lote(s) #{', '.join(map(str, lotes_fallidos))}) — esos productos puntuales usan "
-                        f"el matching local automático como respaldo; el resto sí fue confirmado por la IA."
-                    )
-                timing["gemini_intentos_desambiguacion"] = todos_los_intentos
-                timing["2c_desambiguacion_ia"] = time.perf_counter() - t_antes_gemini2
+                  TABLA DE MEDIDAS (para convertir pallets/cajas a unidades si hace falta):
+                  {measures_csv}
 
-                # Se arma "items" con la misma forma que antes, para no tocar el resto del
-                # flujo (memoria de precios, matching final, etc.) — si la IA no confirmó un
-                # producto, se deja el texto leído para que el matching local (fuzzy) lo intente.
-                items = []
-                for i, ri in enumerate(raw_items, start=1):
-                    eleccion = elecciones.get(i, {})
-                    items.append({
-                        "texto_original": ri.get("texto_original", ""),
-                        "producto_qb": eleccion.get("producto_elegido") or ri.get("producto_leido", ""),
-                        "sku_hint": eleccion.get("sku_elegido") or "",
-                        "qty": ri.get("qty", 1),
-                        "rate": ri.get("rate", 0.0),
-                    })
+                  INSTRUCCIÓN DE PRECIO (RATE): si el pedido trae un precio unitario, extráelo en formato
+                  numérico (ej. 15.99). Si no aparece, coloca 0.0.
+
+                  FORMATO DE SALIDA (JSON ESTRICTO. SOLO DEVUELVE EL ARREGLO JSON):
+                  [
+                    {{
+                      "texto_original": "texto detectado",
+                      "producto_leido": "el producto tal como lo entendiste, en tus palabras",
+                      "qty": 50,
+                      "rate": 15.99
+                    }}
+                  ]
+                  """
+
+                  ai_input = [prompt_extraccion]
+                  if uploaded_image:
+                      ai_input.append(Image.open(uploaded_image))
+                  if pasted_text.strip():
+                      ai_input.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
+
+                  t_antes_gemini1 = time.perf_counter()
+                  raw_text, used_model, error = call_gemini(ai_input, spinner_text="🤖 Leyendo el pedido...")
+                  timing["2a_extraccion_ia"] = time.perf_counter() - t_antes_gemini1
+                  timing["gemini_intentos_extraccion"] = st.session_state.get("last_gemini_attempts", [])
+                  if raw_text is None:
+                      st.error(f"❌ Error de conexión (leyendo el pedido): {error}")
+                      st.session_state["timing_ventas"] = timing
+                      with st.expander(f"⏱️ Modelos probados ({len(timing['gemini_intentos_extraccion'])} intento(s), todos fallaron)"):
+                          for modelo, segundos, resultado in timing["gemini_intentos_extraccion"]:
+                              st.caption(f"↳ {modelo}: {segundos:.2f}s — {resultado}")
+                      st.stop()
+
+                  try:
+                      raw_items = parse_json_response(raw_text)
+                  except json.JSONDecodeError:
+                      st.error("❌ La IA no devolvió un JSON válido al leer el pedido. Mira la respuesta cruda abajo para depurar.")
+                      st.code(raw_text, language="text")
+                      st.session_state["timing_ventas"] = timing
+                      st.stop()
+
+                  st.session_state["ventas_raw_response"] = raw_text
+                  st.session_state["ventas_model_used"] = used_model
+
+                  # =====================================================
+                  # PASO 2a: candidatos locales por producto (Python, sin IA — sigue
+                  # comparando contra el catálogo COMPLETO, solo elige qué mostrarle a la IA)
+                  # =====================================================
+                  t_antes_candidatos = time.perf_counter()
+                  catalog_norm_idx = build_catalog_index(qb_df, prod_col)
+                  candidates_per_item = [
+                      get_top_candidates(qb_df, prod_col, sku_col, str(ri.get("producto_leido", "")).strip(), catalog_norm=catalog_norm_idx)
+                      for ri in raw_items
+                  ]
+                  timing["2b_candidatos_locales"] = time.perf_counter() - t_antes_candidatos
+
+                  # =====================================================
+                  # PASO 2b: la IA elige, por producto, cuál candidato es el correcto.
+                  # Se manda en LOTES chicos (no los 36+ productos de una) — cada llamada
+                  # es más chica y tiene mucha más chance de responder a tiempo; si un
+                  # lote falla, solo se pierde ese lote (no todo el pedido).
+                  # =====================================================
+                  DISAMBIG_BATCH_SIZE = 8
+                  elecciones = {}
+                  lotes_fallidos = []
+                  todos_los_intentos = []
+                  t_antes_gemini2 = time.perf_counter()
+                  lotes = [
+                      (i, raw_items[i:i + DISAMBIG_BATCH_SIZE], candidates_per_item[i:i + DISAMBIG_BATCH_SIZE])
+                      for i in range(0, len(raw_items), DISAMBIG_BATCH_SIZE)
+                  ]
+                  for n_lote, (offset, lote_items, lote_candidatos) in enumerate(lotes, start=1):
+                      prompt_desambiguacion = build_disambiguation_prompt(lote_items, lote_candidatos, prod_col, sku_col, sales_desc_col)
+
+                      raw_text2 = None
+                      # Si un lote falla los 5 modelos, se reintenta UNA vez más desde cero antes
+                      # de rendirse — se comprobó que fallos así suelen ser intermitentes (un lote
+                      # igual de chico, segundos después, respondió bien a la primera).
+                      for intento_lote in (1, 2):
+                          spinner_txt = f"🔎 Confirmando productos contra el catálogo (lote {n_lote}/{len(lotes)}"
+                          spinner_txt += f", reintento {intento_lote-1})..." if intento_lote > 1 else ")..."
+                          raw_text2, used_model2, error2 = call_gemini([prompt_desambiguacion], spinner_text=spinner_txt)
+                          todos_los_intentos.extend(st.session_state.get("last_gemini_attempts", []))
+                          if raw_text2 is not None:
+                              break
+
+                      if raw_text2 is None:
+                          lotes_fallidos.append(n_lote)
+                          continue
+                      try:
+                          for e in parse_json_response(raw_text2):
+                              idx_local = e.get("indice")
+                              if isinstance(idx_local, int):
+                                  elecciones[offset + idx_local] = e  # remapear al índice global del pedido
+                      except json.JSONDecodeError:
+                          lotes_fallidos.append(n_lote)
+
+                  if lotes_fallidos:
+                      st.warning(
+                          f"⚠️ {len(lotes_fallidos)} de {len(lotes)} lote(s) de confirmación fallaron "
+                          f"(lote(s) #{', '.join(map(str, lotes_fallidos))}) — esos productos puntuales usan "
+                          f"el matching local automático como respaldo; el resto sí fue confirmado por la IA."
+                      )
+                  timing["gemini_intentos_desambiguacion"] = todos_los_intentos
+                  timing["2c_desambiguacion_ia"] = time.perf_counter() - t_antes_gemini2
+
+                  # Se arma "items" con la misma forma que antes, para no tocar el resto del
+                  # flujo (memoria de precios, matching final, etc.) — si la IA no confirmó un
+                  # producto, se deja el texto leído para que el matching local (fuzzy) lo intente.
+                  items = []
+                  for i, ri in enumerate(raw_items, start=1):
+                      eleccion = elecciones.get(i, {})
+                      items.append({
+                          "texto_original": ri.get("texto_original", ""),
+                          "producto_qb": eleccion.get("producto_elegido") or ri.get("producto_leido", ""),
+                          "sku_hint": eleccion.get("sku_elegido") or "",
+                          "qty": ri.get("qty", 1),
+                          "rate": ri.get("rate", 0.0),
+                      })
 
                 t_antes_memoria = time.perf_counter()
                 with st.spinner("💰 Consultando Google Sheets y precios históricos..."):
@@ -1034,7 +1104,8 @@ with tab_ventas:
 
         timing = st.session_state.get("timing_ventas", {})
         if timing:
-            with st.expander(f"⏱️ Tiempos de este procesamiento (total: {timing.get('total', 0):.1f}s)"):
+            with st.expander(f"⏱️ Tiempos de este procesamiento (total: {timing.get('total', 0):.1f}s) — modo: {timing.get('modo', '—')}"):
+                st.write(f"0. Intento con caché (catálogo completo): **{timing.get('0_intento_cache', 0):.2f}s**")
                 st.write(f"1. Preparar tabla de medidas: **{timing.get('1_preparar_medidas', 0):.2f}s**")
                 st.write(f"2a. Leer el pedido (IA, sin catálogo): **{timing.get('2a_extraccion_ia', 0):.2f}s**")
                 for modelo, segundos, resultado in timing.get("gemini_intentos_extraccion", []):
