@@ -1486,7 +1486,7 @@ with tab_compras:
             "QuickBooks, no algo que la app pueda forzar. Si pasa, el SKU ya está en la fila: solo "
             "selecciona el producto del desplegable manualmente en esa línea puntual."
         )
-        st.code(tsv_from_df(edited_compras_df, ["Product/service", "SKU", "Description", "Qty", "Cost"], leading_blank=True), language="text")
+        st.code(tsv_from_df(edited_compras_df, ["Product/service", "SKU", "Description", "Qty", "Cost"], leading_blank=False), language="text")
 
         st.divider()
         if qb_connected:
