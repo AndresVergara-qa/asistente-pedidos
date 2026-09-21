@@ -803,14 +803,6 @@ with tab_ventas:
                 Escribe el nombre del producto tal como lo entiendes del pedido — NO intentes adivinar
                 el nombre exacto de ningún catálogo, solo describe qué producto es lo más claro posible.
 
-                IMPORTANTE — CANTIDAD (QTY): la empresa vende por MASTER CASE (cajas de 24 unidades,
-                formato "2x12"), NO por caja individual de 12. Si el pedido/imagen muestra varias
-                columnas o cifras de cantidad para un mismo producto (ej. "Master Case" y "Cajas Venta",
-                donde Cajas Venta suele ser el doble de Master Case porque son cajas de 12 en vez de
-                24), usa SIEMPRE la cantidad de MASTER CASE — nunca "Cajas Venta" ni ninguna otra
-                cantidad derivada/desglosada. Si el pedido solo trae una cifra de cantidad, úsala tal
-                cual (no hay que convertir nada).
-
                 TABLA DE MEDIDAS (para convertir pallets/cajas a unidades si hace falta):
                 {measures_csv}
 
