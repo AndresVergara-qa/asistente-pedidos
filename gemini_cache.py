@@ -21,7 +21,7 @@ from google.generativeai import caching
 from gsheets_utils import get_gsheets_connection
 
 CACHE_WORKSHEET = "gemini_cache"
-CACHE_TTL_HOURS = 12
+CACHE_TTL_HOURS = 1
 
 
 def _catalog_hash(text):
