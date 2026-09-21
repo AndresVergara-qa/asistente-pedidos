@@ -306,6 +306,20 @@ def normalize(s):
     return re.sub(r"\s+", " ", str(s).strip().upper())
 
 
+def build_full_catalog_csv(qb_df, prod_col, sku_col, sales_desc_col, purchase_desc_col):
+    """Catálogo completo para el caché de Gemini — SIEMPRE con las mismas
+    columnas sin importar si lo arma Ventas o Compras, para que ambos
+    generen el mismo texto (mismo hash) y así compartan el mismo caché en
+    vez de crear uno cada uno."""
+    cols = [prod_col]
+    seen = {prod_col}
+    for c in [sku_col, sales_desc_col, purchase_desc_col]:
+        if c is not None and c not in seen:
+            cols.append(c)
+            seen.add(c)
+    return qb_df[cols].dropna(subset=[prod_col]).to_csv(index=False)
+
+
 # =========================================================
 # MATCHING ROBUSTO — usado por Ventas y Compras
 # =========================================================
@@ -811,8 +825,7 @@ with tab_ventas:
                 cache_error = None
                 t_antes_cache = time.perf_counter()
                 try:
-                    cols_qb = [c for c in [prod_col, sku_col, sales_desc_col] if c is not None]
-                    catalog_csv = qb_df[cols_qb].dropna(subset=[prod_col]).to_csv(index=False)
+                    catalog_csv = build_full_catalog_csv(qb_df, prod_col, sku_col, sales_desc_col, purchase_desc_col)
                     candidatos_modelo = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
                     cache_model = pick_preferred_model(candidatos_modelo) or (candidatos_modelo[0] if candidatos_modelo else None)
                     if not cache_model:
@@ -1225,54 +1238,163 @@ with tab_compras:
             st.error("⚠️ Debes subir una imagen de la factura del proveedor.")
         else:
             try:
+                t_inicio_c = time.perf_counter()
+                timing_c = {}
                 genai.configure(api_key=DEFAULT_API_KEY.strip())
 
-                cols_qb_compras = [c for c in [prod_col, sku_col, purchase_desc_col] if c is not None]
-                catalog_compras_csv = qb_df[cols_qb_compras].dropna(subset=[prod_col]).to_csv(index=False)
-
-                prompt_compras = f"""
-                Eres un experto analizando facturas de compras (Bills) y cruzando datos con inventarios.
-
-                TAREAS:
-                1. Extrae los productos reales de la factura. IGNORA: Taxes, Cupones, Freight y Pallets.
-                2. Busca CADA producto en el CATÁLOGO DE QUICKBOOKS proporcionado.
-                3. Debes devolver el NOMBRE EXACTO y el SKU EXACTO tal como aparecen en el Catálogo de
-                   QuickBooks. No inventes nombres ni combines columnas. Ten cuidado con productos parecidos
-                   entre sí (variantes orgánicas, tamaños, sabores) — compara letra por letra.
-
-                CATÁLOGO DE QUICKBOOKS:
-                {catalog_compras_csv}
-
-                FORMATO DE SALIDA (JSON ESTRICTO):
-                [
-                    {{
-                        "producto_qb": "Nombre del producto EXACTO extraído de la columna del catálogo",
-                        "sku_qb": "SKU EXACTO extraído de la columna del catálogo",
-                        "original_description": "Lo que dice la factura original del proveedor",
-                        "qty": 10,
-                        "cost": 15.50
-                    }}
-                ]
-                Solo devuelve el JSON puro.
-                """
-
-                image_parts = [Image.open(uploaded_bill)]
-                raw_text_compras, used_model_compras, error_compras = call_gemini(
-                    [prompt_compras] + image_parts, spinner_text="📦 Analizando factura e identificando SKUs precisos..."
-                )
-                if raw_text_compras is None:
-                    st.error(f"❌ Error al procesar la factura: {error_compras}")
-                    st.stop()
-
+                # =====================================================
+                # INTENTO CON CACHÉ: mismo catálogo completo que Ventas — si Ventas
+                # ya lo armó hoy, Compras reusa el MISMO caché (mismo catalog_csv +
+                # mismo modelo = mismo hash), sin pagar el costo dos veces.
+                # =====================================================
+                datos_compras = None
+                cache_error_c = None
+                t_antes_cache_c = time.perf_counter()
                 try:
-                    datos_compras = parse_json_response(raw_text_compras)
-                except json.JSONDecodeError:
-                    st.error("❌ La IA no devolvió un JSON válido. Mira la respuesta cruda abajo para depurar.")
-                    st.code(raw_text_compras, language="text")
-                    st.stop()
+                    catalog_csv = build_full_catalog_csv(qb_df, prod_col, sku_col, sales_desc_col, purchase_desc_col)
+                    candidatos_modelo = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
+                    cache_model = pick_preferred_model(candidatos_modelo) or (candidatos_modelo[0] if candidatos_modelo else None)
+                    if not cache_model:
+                        raise RuntimeError("no hay modelos disponibles para cachear")
 
-                st.session_state["compras_raw_response"] = raw_text_compras
-                st.session_state["compras_model_used"] = used_model_compras
+                    reglas_compras = """
+                    TAREAS:
+                    1. Extrae los productos reales de la factura. IGNORA: Taxes, Cupones, Freight y Pallets.
+                    2. Busca CADA producto en el catálogo. Devuelve el NOMBRE EXACTO y el SKU EXACTO tal
+                       como aparecen ahí. No inventes nombres ni combines columnas.
+                    3. Ten cuidado con productos parecidos entre sí (variantes orgánicas, tamaños,
+                       sabores) — compara letra por letra antes de elegir.
+                    """
+                    cached_content = gemini_cache.get_or_create_cache(catalog_csv, cache_model, reglas_compras)
+                    cached_model_obj = genai.GenerativeModel.from_cached_content(cached_content)
+
+                    prompt_bill_cache = """
+                    Analiza esta factura de compra (Bill) usando el catálogo que ya tienes.
+                    FORMATO DE SALIDA (JSON ESTRICTO):
+                    [
+                        {"producto_qb": "Nombre EXACTO del catálogo", "sku_qb": "SKU EXACTO del catálogo", "qty": 10, "cost": 15.50}
+                    ]
+                    Solo devuelve el JSON puro.
+                    """
+                    image_parts_cache = [Image.open(uploaded_bill)]
+                    with st.spinner("📦 Analizando factura (catálogo completo, vía caché)..."):
+                        response_c = cached_model_obj.generate_content([prompt_bill_cache] + image_parts_cache, request_options={"timeout": 45})
+                    raw_text_compras = response_c.text
+                    datos_compras = parse_json_response(raw_text_compras)
+                    st.session_state["compras_raw_response"] = raw_text_compras
+                    st.session_state["compras_model_used"] = f"{cache_model} (caché)"
+                    timing_c["modo"] = "caché (catálogo completo)"
+                except Exception as e:
+                    cache_error_c = str(e)
+                    datos_compras = None
+                timing_c["0_intento_cache"] = time.perf_counter() - t_antes_cache_c
+
+                if datos_compras is None:
+                  if cache_error_c:
+                      st.info(f"ℹ️ No se pudo usar el caché del catálogo completo, se usa el sistema de respaldo (2 pasos): {cache_error_c}")
+                  timing_c["modo"] = "2 pasos (respaldo)"
+                  # =====================================================
+                  # PASO 1: leer la factura SIN el catálogo (prompt chico, rápido)
+                  # =====================================================
+                  prompt_extraccion_c = """
+                  Eres un experto leyendo facturas de compra (Bills) de proveedores. Extrae CADA
+                  producto real de la factura, con su cantidad y costo unitario. IGNORA: Taxes,
+                  Cupones, Freight y Pallets. Escribe el nombre del producto tal como lo entiendes —
+                  NO intentes adivinar el nombre exacto de ningún catálogo.
+                  FORMATO DE SALIDA (JSON ESTRICTO. SOLO EL ARREGLO JSON):
+                  [
+                    {"texto_original": "texto detectado", "producto_leido": "el producto tal como lo entendiste", "qty": 10, "cost": 15.50}
+                  ]
+                  """
+                  image_parts = [Image.open(uploaded_bill)]
+                  t_antes_gemini1c = time.perf_counter()
+                  raw_text_compras, used_model_compras, error_compras = call_gemini(
+                      [prompt_extraccion_c] + image_parts, spinner_text="📦 Leyendo la factura..."
+                  )
+                  timing_c["2a_extraccion_ia"] = time.perf_counter() - t_antes_gemini1c
+                  timing_c["gemini_intentos_extraccion"] = st.session_state.get("last_gemini_attempts", [])
+                  if raw_text_compras is None:
+                      st.error(f"❌ Error de conexión (leyendo la factura): {error_compras}")
+                      st.session_state["timing_compras"] = timing_c
+                      with st.expander(f"⏱️ Modelos probados ({len(timing_c['gemini_intentos_extraccion'])} intento(s), todos fallaron)"):
+                          for modelo, segundos, resultado in timing_c["gemini_intentos_extraccion"]:
+                              st.caption(f"↳ {modelo}: {segundos:.2f}s — {resultado}")
+                      st.stop()
+
+                  try:
+                      raw_items_c = parse_json_response(raw_text_compras)
+                  except json.JSONDecodeError:
+                      st.error("❌ La IA no devolvió un JSON válido al leer la factura. Mira la respuesta cruda abajo para depurar.")
+                      st.code(raw_text_compras, language="text")
+                      st.session_state["timing_compras"] = timing_c
+                      st.stop()
+
+                  st.session_state["compras_raw_response"] = raw_text_compras
+                  st.session_state["compras_model_used"] = used_model_compras
+
+                  # PASO 2a: candidatos locales por producto (Python, sin IA — sigue
+                  # comparando contra el catálogo COMPLETO, solo elige qué mostrarle a la IA)
+                  t_antes_candidatos_c = time.perf_counter()
+                  catalog_norm_idx_c = build_catalog_index(qb_df, prod_col)
+                  candidates_per_item_c = [
+                      get_top_candidates(qb_df, prod_col, sku_col, str(ri.get("producto_leido", "")).strip(), catalog_norm=catalog_norm_idx_c)
+                      for ri in raw_items_c
+                  ]
+                  timing_c["2b_candidatos_locales"] = time.perf_counter() - t_antes_candidatos_c
+
+                  # PASO 2b: la IA elige, por producto, cuál candidato es el correcto — en
+                  # lotes chicos, con un reintento por lote si falla.
+                  DISAMBIG_BATCH_SIZE = 8
+                  elecciones_c = {}
+                  lotes_fallidos_c = []
+                  todos_los_intentos_c = []
+                  t_antes_gemini2c = time.perf_counter()
+                  lotes_c = [
+                      (i, raw_items_c[i:i + DISAMBIG_BATCH_SIZE], candidates_per_item_c[i:i + DISAMBIG_BATCH_SIZE])
+                      for i in range(0, len(raw_items_c), DISAMBIG_BATCH_SIZE)
+                  ]
+                  for n_lote, (offset, lote_items, lote_candidatos) in enumerate(lotes_c, start=1):
+                      prompt_desambiguacion_c = build_disambiguation_prompt(lote_items, lote_candidatos, prod_col, sku_col, purchase_desc_col)
+                      raw_text2c = None
+                      for intento_lote in (1, 2):
+                          spinner_txt = f"🔎 Confirmando productos contra el catálogo (lote {n_lote}/{len(lotes_c)}"
+                          spinner_txt += f", reintento {intento_lote-1})..." if intento_lote > 1 else ")..."
+                          raw_text2c, used_model2c, error2c = call_gemini([prompt_desambiguacion_c], spinner_text=spinner_txt)
+                          todos_los_intentos_c.extend(st.session_state.get("last_gemini_attempts", []))
+                          if raw_text2c is not None:
+                              break
+                      if raw_text2c is None:
+                          lotes_fallidos_c.append(n_lote)
+                          continue
+                      try:
+                          for e in parse_json_response(raw_text2c):
+                              idx_local = e.get("indice")
+                              if isinstance(idx_local, int):
+                                  elecciones_c[offset + idx_local] = e
+                      except json.JSONDecodeError:
+                          lotes_fallidos_c.append(n_lote)
+
+                  if lotes_fallidos_c:
+                      st.warning(
+                          f"⚠️ {len(lotes_fallidos_c)} de {len(lotes_c)} lote(s) de confirmación fallaron "
+                          f"(lote(s) #{', '.join(map(str, lotes_fallidos_c))}) — esos productos puntuales usan "
+                          f"el matching local automático como respaldo; el resto sí fue confirmado por la IA."
+                      )
+                  timing_c["gemini_intentos_desambiguacion"] = todos_los_intentos_c
+                  timing_c["2c_desambiguacion_ia"] = time.perf_counter() - t_antes_gemini2c
+
+                  datos_compras = []
+                  for i, ri in enumerate(raw_items_c, start=1):
+                      eleccion = elecciones_c.get(i, {})
+                      datos_compras.append({
+                          "producto_qb": eleccion.get("producto_elegido") or ri.get("producto_leido", ""),
+                          "sku_qb": eleccion.get("sku_elegido") or "",
+                          "qty": ri.get("qty", 1),
+                          "cost": ri.get("cost", 0.0),
+                      })
+
+                timing_c["total"] = time.perf_counter() - t_inicio_c
+                st.session_state["timing_compras"] = timing_c
 
                 catalog_norm_idx_compras = build_catalog_index(qb_df, prod_col)
                 results_compras = []
@@ -1320,6 +1442,18 @@ with tab_compras:
             img_col, space_col = st.columns([1, 1])
             with img_col:
                 st.image(uploaded_bill, use_container_width=True)
+
+        timing_c = st.session_state.get("timing_compras", {})
+        if timing_c:
+            with st.expander(f"⏱️ Tiempos de este procesamiento (total: {timing_c.get('total', 0):.1f}s) — modo: {timing_c.get('modo', '—')}"):
+                st.write(f"0. Intento con caché (catálogo completo): **{timing_c.get('0_intento_cache', 0):.2f}s**")
+                st.write(f"2a. Leer la factura (IA, sin catálogo): **{timing_c.get('2a_extraccion_ia', 0):.2f}s**")
+                for modelo, segundos, resultado in timing_c.get("gemini_intentos_extraccion", []):
+                    st.caption(f"　　↳ {modelo}: {segundos:.2f}s — {resultado}")
+                st.write(f"2b. Buscar candidatos locales por producto: **{timing_c.get('2b_candidatos_locales', 0):.2f}s**")
+                st.write(f"2c. Confirmar productos contra el catálogo (IA): **{timing_c.get('2c_desambiguacion_ia', 0):.2f}s**")
+                for modelo, segundos, resultado in timing_c.get("gemini_intentos_desambiguacion", []):
+                    st.caption(f"　　↳ {modelo}: {segundos:.2f}s — {resultado}")
 
         with st.expander("🐞 Ver respuesta cruda de la IA (debug)"):
             st.caption(f"Modelo usado: {st.session_state.get('compras_model_used', '—')}")
