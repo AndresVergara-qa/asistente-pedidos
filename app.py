@@ -878,11 +878,19 @@ with tab_ventas:
                 ]
                 for n_lote, (offset, lote_items, lote_candidatos) in enumerate(lotes, start=1):
                     prompt_desambiguacion = build_disambiguation_prompt(lote_items, lote_candidatos, prod_col, sku_col, sales_desc_col)
-                    raw_text2, used_model2, error2 = call_gemini(
-                        [prompt_desambiguacion],
-                        spinner_text=f"🔎 Confirmando productos contra el catálogo (lote {n_lote}/{len(lotes)})...",
-                    )
-                    todos_los_intentos.extend(st.session_state.get("last_gemini_attempts", []))
+
+                    raw_text2 = None
+                    # Si un lote falla los 5 modelos, se reintenta UNA vez más desde cero antes
+                    # de rendirse — se comprobó que fallos así suelen ser intermitentes (un lote
+                    # igual de chico, segundos después, respondió bien a la primera).
+                    for intento_lote in (1, 2):
+                        spinner_txt = f"🔎 Confirmando productos contra el catálogo (lote {n_lote}/{len(lotes)}"
+                        spinner_txt += f", reintento {intento_lote-1})..." if intento_lote > 1 else ")..."
+                        raw_text2, used_model2, error2 = call_gemini([prompt_desambiguacion], spinner_text=spinner_txt)
+                        todos_los_intentos.extend(st.session_state.get("last_gemini_attempts", []))
+                        if raw_text2 is not None:
+                            break
+
                     if raw_text2 is None:
                         lotes_fallidos.append(n_lote)
                         continue
