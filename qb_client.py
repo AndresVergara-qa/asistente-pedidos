@@ -263,48 +263,62 @@ def fetch_catalog_df():
 
 
 # =========================================================
-# ESTIMATES ABIERTOS (demanda para el forecast de compras)
+# ESTIMATES (demanda para el forecast de compras)
 # =========================================================
-def fetch_open_estimates():
-    """Trae los Estimates que todavía no están Closed/Rejected, con sus
-    líneas. Como el Estimate ya se creó apuntando a un Item real del
-    catálogo (ItemRef), no hace falta volver a identificar el producto —
-    solo cruzar ese ItemRef contra el catálogo para sacar el SKU real.
-    Las líneas que quedaron como texto libre (producto no encontrado en el
-    catálogo al crear el estimado) se marcan con 'sin_catalogar': True para
-    que se revisen a mano, en vez de inventarles una cantidad.
-    Devuelve una lista de dicts: {id, doc_number, customer, txn_date, lines}.
-    """
-    estimates = _query("SELECT * FROM Estimate MAXRESULTS 1000").get("Estimate", [])
-    out = []
-    for est in estimates:
-        if est.get("TxnStatus", "") in ("Closed", "Rejected"):
+def _parse_estimate(est):
+    """Convierte el JSON crudo de un Estimate de QuickBooks a la forma que
+    usa el forecast. Cada línea con ItemRef trae también 'line_description'
+    (la Description de esa línea en particular) porque Ventas a veces usa
+    un ítem genérico tipo "Sales" cuando no está seguro de que el producto
+    esté en inventario, y escribe el producto real ahí en vez de en el
+    nombre del ítem. Las líneas de texto libre (DescriptionOnly — cuando el
+    Estimate se creó sin encontrar el producto en el catálogo) se marcan
+    con 'sin_catalogar': True."""
+    lines = []
+    for ln in est.get("Line", []):
+        detail = ln.get("SalesItemLineDetail")
+        if detail and detail.get("ItemRef", {}).get("value"):
+            lines.append({
+                "item_id": detail["ItemRef"]["value"],
+                "product_name": detail["ItemRef"].get("name", ""),
+                "line_description": ln.get("Description", ""),
+                "qty": float(detail.get("Qty", 0) or 0),
+                "sin_catalogar": False,
+            })
+        elif ln.get("DetailType") == "DescriptionOnly" and ln.get("Description"):
+            lines.append({
+                "item_id": "",
+                "product_name": ln["Description"],
+                "line_description": "",
+                "qty": 0,
+                "sin_catalogar": True,
+            })
+    return {
+        "id": est.get("Id", ""),
+        "doc_number": est.get("DocNumber", est.get("Id", "")),
+        "customer": est.get("CustomerRef", {}).get("name", ""),
+        "txn_date": est.get("TxnDate", ""),
+        "lines": lines,
+    }
+
+
+def fetch_estimates_by_doc_numbers(doc_numbers):
+    """Trae del forecast solo los Estimates que Gerencia pasó por el grupo
+    (su número de documento), uno por uno — en vez de traer TODOS los
+    abiertos, que puede incluir estimados reviejos que ya no aplican a
+    este forecast. Devuelve (encontrados, no_encontrados)."""
+    encontrados = []
+    no_encontrados = []
+    for doc_number in doc_numbers:
+        dn = str(doc_number).strip()
+        if not dn:
             continue
-        lines = []
-        for ln in est.get("Line", []):
-            detail = ln.get("SalesItemLineDetail")
-            if detail and detail.get("ItemRef", {}).get("value"):
-                lines.append({
-                    "item_id": detail["ItemRef"]["value"],
-                    "product_name": detail["ItemRef"].get("name", ""),
-                    "qty": float(detail.get("Qty", 0) or 0),
-                    "sin_catalogar": False,
-                })
-            elif ln.get("DetailType") == "DescriptionOnly" and ln.get("Description"):
-                lines.append({
-                    "item_id": "",
-                    "product_name": ln["Description"],
-                    "qty": 0,
-                    "sin_catalogar": True,
-                })
-        out.append({
-            "id": est.get("Id", ""),
-            "doc_number": est.get("DocNumber", est.get("Id", "")),
-            "customer": est.get("CustomerRef", {}).get("name", ""),
-            "txn_date": est.get("TxnDate", ""),
-            "lines": lines,
-        })
-    return out
+        result = _query(f"SELECT * FROM Estimate WHERE DocNumber = '{_escape_sql(dn)}' MAXRESULTS 10").get("Estimate", [])
+        if not result:
+            no_encontrados.append(doc_number)
+            continue
+        encontrados.append(_parse_estimate(result[0]))
+    return encontrados, no_encontrados
 
 
 # =========================================================

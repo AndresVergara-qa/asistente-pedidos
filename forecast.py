@@ -24,6 +24,52 @@ import transito
 
 FALTANTE_RE = re.compile(r"Cant:\s*([\d.]+)")
 
+# Ítem genérico que Ventas usa en QuickBooks cuando no está seguro de que el
+# producto esté registrado en inventario — el producto real queda escrito en
+# la Description de la línea, no en el nombre del ítem.
+PLACEHOLDER_NAMES = {"SALES", "SALE", "VENTA", "VENTAS"}
+
+
+def _clean_faltante_text(raw_text):
+    """Le quita a nuestro propio texto de línea sin catálogo (ver
+    qb_client.create_estimate) el prefijo/sufijo que le agregamos, para
+    quedarnos solo con el nombre del producto."""
+    texto = re.sub(r"^\[FALTA EN CATÁLOGO QB\]\s*", "", raw_text)
+    texto = re.sub(r"\s*—\s*Cant:.*$", "", texto)
+    return texto.strip()
+
+
+def _resolve_or_zero(etiqueta, texto_crudo, qty, matcher):
+    """Para una línea sin ítem real de catálogo (placeholder 'Sales' o
+    texto libre): intenta encontrarla de verdad en el catálogo con el
+    mismo matcher que ya usan Ventas/Compras. Si no hay match, igual se
+    cuenta como demanda real — se incluye con SKU '0' (tal como se anota
+    a mano en el Excel) en vez de dejarla fuera del total."""
+    if matcher is not None and texto_crudo:
+        try:
+            actual_pname, sku_val, desc_val, estado = matcher(texto_crudo)
+        except Exception:
+            estado = "❌ Sin match"
+            actual_pname = sku_val = desc_val = None
+        # resolve_item() devuelve una etiqueta con emoji (ver ESTADO_LABELS
+        # en app.py), no el código interno — "❌" es la única que significa
+        # que no encontró nada en el catálogo.
+        if estado and not estado.startswith("❌"):
+            return {
+                "Estimate": etiqueta,
+                "Product/Service": actual_pname,
+                "SKU": sku_val,
+                "Description": desc_val,
+                "Qty": qty,
+            }
+    return {
+        "Estimate": etiqueta,
+        "Product/Service": texto_crudo or "(sin descripción)",
+        "SKU": "0",
+        "Description": texto_crudo,
+        "Qty": qty,
+    }
+
 
 def reconcile_transito_with_quickbooks(qb_df):
     """Revisa los Bills reales de QuickBooks (sin importar si se crearon
@@ -60,14 +106,23 @@ def reconcile_transito_with_quickbooks(qb_df):
     return total_cerradas
 
 
-def build_line_items(selected_estimates, qb_df):
+def build_line_items(selected_estimates, qb_df, matcher=None):
     """Aplana las líneas de los estimates seleccionados, cruzando contra el
     catálogo (por Item Id) para traer el SKU/Descripción reales.
+
+    Dos casos de línea "sin identificar" (ambos se intentan resolver con
+    `matcher` — el mismo matching de catálogo que ya usan Ventas/Compras —
+    y si no hay match, se cuentan igual como demanda con SKU '0', nunca se
+    descartan):
+    - Texto libre (DescriptionOnly) que deja esta misma app cuando un
+      Estimate se crea sin encontrar el producto en el catálogo.
+    - Líneas creadas directo en QuickBooks con el ítem genérico "Sales"
+      (o sin SKU) — el producto real queda escrito en la Description de
+      la línea, no en el nombre del ítem.
+
     Devuelve (detalle_df, pendientes_df): detalle_df tiene una fila por
-    línea de estimate (Estimate, Product/Service, SKU, Description, Qty);
-    pendientes_df son líneas sin match de catálogo (quedaron como texto
-    libre al crear el estimado) — el procedimiento pide confirmarlas a mano
-    antes de asignarles cantidad, no inventarlas."""
+    línea de estimate (Estimate, Product/Service, SKU, Description, Qty).
+    pendientes_df son casos raros sin ningún texto del que partir."""
     catalog_by_id = {}
     for _, row in qb_df.iterrows():
         item_id = str(row.get("Item Id", "")).strip()
@@ -81,20 +136,25 @@ def build_line_items(selected_estimates, qb_df):
         for ln in est["lines"]:
             if ln.get("sin_catalogar"):
                 m = FALTANTE_RE.search(ln["product_name"])
-                pendientes.append({
-                    "Estimate": etiqueta,
-                    "Descripción cruda": ln["product_name"],
-                    "Qty detectada": float(m.group(1)) if m else None,
-                })
+                qty = float(m.group(1)) if m else 0
+                texto = _clean_faltante_text(ln["product_name"])
+                if not texto:
+                    pendientes.append({"Estimate": etiqueta, "Descripción cruda": ln["product_name"], "Qty detectada": qty})
+                    continue
+                filas.append(_resolve_or_zero(etiqueta, texto, qty, matcher))
                 continue
 
             cat_row = catalog_by_id.get(str(ln["item_id"]))
-            if cat_row is None:
-                pendientes.append({
-                    "Estimate": etiqueta,
-                    "Descripción cruda": ln["product_name"],
-                    "Qty detectada": ln["qty"],
-                })
+            sku_real = str(cat_row.get("SKU", "")).strip() if cat_row is not None else ""
+            nombre_item = str(ln.get("product_name", "")).strip().upper()
+            es_placeholder = cat_row is None or not sku_real or nombre_item in PLACEHOLDER_NAMES
+
+            if es_placeholder:
+                texto = str(ln.get("line_description", "")).strip() or str(ln.get("product_name", "")).strip()
+                if not texto:
+                    pendientes.append({"Estimate": etiqueta, "Descripción cruda": ln.get("product_name", ""), "Qty detectada": ln["qty"]})
+                    continue
+                filas.append(_resolve_or_zero(etiqueta, texto, ln["qty"], matcher))
                 continue
 
             filas.append({

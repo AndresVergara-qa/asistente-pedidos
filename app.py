@@ -1540,12 +1540,37 @@ with tab_forecast:
     if not qb_connected:
         st.warning("🔌 Conecta QuickBooks (barra lateral) para usar el Forecast.")
     else:
-        if st.button("🔄 Traer Estimates abiertos de QuickBooks"):
-            try:
+        st.markdown("**🧾 Estimates para este forecast**")
+        st.caption(
+            "Anota uno por uno los números de Estimate que pasó Gerencia por el grupo, y luego los traes todos "
+            "juntos — así no se mezclan Estimates viejos que ya no aplican a este forecast (QuickBooks tiene "
+            "estimados abiertos de hace tiempo que nunca se usaron)."
+        )
+        doc_list = st.session_state.setdefault("forecast_doc_numbers", [])
+
+        with st.form("agregar_doc_number", clear_on_submit=True):
+            col_a, col_b = st.columns([3, 1])
+            nuevo_doc = col_a.text_input("Número de Estimate", label_visibility="collapsed", placeholder="Ej: 0911805")
+            if col_b.form_submit_button("➕ Agregar a la lista"):
+                nuevo_doc = nuevo_doc.strip()
+                if nuevo_doc and nuevo_doc not in doc_list:
+                    doc_list.append(nuevo_doc)
+
+        if doc_list:
+            col_lista, col_limpiar = st.columns([4, 1])
+            col_lista.info("📋 " + ", ".join(doc_list))
+            if col_limpiar.button("🗑️ Limpiar lista"):
+                st.session_state["forecast_doc_numbers"] = []
+                st.rerun()
+
+            if st.button("📥 Traer estos Estimates de QuickBooks", type="primary"):
                 with st.spinner("Consultando QuickBooks..."):
-                    st.session_state["forecast_estimates"] = qb_client.fetch_open_estimates()
-            except Exception as e:
-                st.error(f"❌ No se pudieron traer los Estimates: {e}")
+                    encontrados, no_encontrados = qb_client.fetch_estimates_by_doc_numbers(doc_list)
+                st.session_state["forecast_estimates"] = encontrados
+                if no_encontrados:
+                    st.warning("⚠️ No se encontraron en QuickBooks estos números: " + ", ".join(no_encontrados))
+                if encontrados:
+                    st.success(f"✅ Se trajeron {len(encontrados)} Estimate(s).")
 
         estimates = st.session_state.get("forecast_estimates", [])
 
@@ -1607,25 +1632,34 @@ with tab_forecast:
 
         st.divider()
         if not estimates:
-            st.caption("Aún no has traído los estimates abiertos — dale clic a 'Traer Estimates abiertos de QuickBooks'.")
+            st.caption("Agrega los números de Estimate arriba y tráelos para generar el forecast.")
         elif qb_df is None or "Item Id" not in qb_df.columns:
             st.warning("⚠️ El Forecast necesita el catálogo traído de QuickBooks (no un archivo manual) — selecciona 'QuickBooks (automático)' en 'Origen del catálogo', en la barra lateral.")
         else:
-            opciones = {f"Estimate {e['doc_number']} — {e['customer']} ({e['txn_date']})": e for e in estimates}
-            seleccion = st.multiselect("Estimates a incluir en este forecast", list(opciones.keys()))
-            selected_estimates = [opciones[s] for s in seleccion]
+            st.caption("Estimates listos para este forecast: " + ", ".join(f"{e['doc_number']} ({e['customer']})" for e in estimates))
 
-            if selected_estimates and st.button("📈 Generar Forecast", type="primary"):
+            if st.button("📈 Generar Forecast", type="primary"):
+                catalog_norm_idx_forecast = build_catalog_index(qb_df, prod_col)
+
+                def _forecast_resolver(p_name):
+                    return resolve_item(
+                        qb_df, prod_col, sku_col, sales_desc_col, p_name,
+                        catalog_norm=catalog_norm_idx_forecast, fallback_desc_col=purchase_desc_col,
+                    )
+
                 with st.spinner("Armando el forecast..."):
-                    detalle_df, pendientes_df = forecast.build_line_items(selected_estimates, qb_df)
+                    detalle_df, pendientes_df = forecast.build_line_items(estimates, qb_df, matcher=_forecast_resolver)
                     forecast_df, estimate_cols = forecast.build_forecast_table(detalle_df, qb_df)
 
                 if forecast_df.empty:
-                    st.warning("No hay líneas con producto de catálogo en los estimates seleccionados.")
+                    st.warning("No hay líneas con producto de catálogo en los estimates traídos.")
                 else:
                     st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+                    n_sin_sku = (forecast_df["SKU"].astype(str) == "0").sum()
+                    if n_sin_sku:
+                        st.warning(f"⚠️ {n_sin_sku} línea(s) no se encontraron en el catálogo (quedaron con SKU '0') — confirma si realmente no están en inventario.")
                     if not pendientes_df.empty:
-                        st.warning("⚠️ Estas líneas no se pudieron identificar contra el catálogo — revísalas a mano antes de sumarlas:")
+                        st.warning("⚠️ Estas líneas no tenían ni producto ni descripción de la que partir — revísalas a mano:")
                         st.dataframe(pendientes_df, use_container_width=True, hide_index=True)
                     excel_buf = forecast.export_excel(forecast_df, estimate_cols, pendientes_df)
                     st.download_button(
