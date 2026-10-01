@@ -65,7 +65,6 @@ div.stButton > button[kind="primary"]:hover {
 </style>
 <div class="cd-hero">
     <h1>Convenient <span>Distributor</span></h1>
-    <p>🧾 Asistente Integral de Pedidos y Compras — mapeo inteligente con Inteligencia Artificial</p>
 </div>
 """, unsafe_allow_html=True)
 
