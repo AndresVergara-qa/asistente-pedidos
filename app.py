@@ -1557,9 +1557,16 @@ with tab_forecast:
                     doc_list.append(nuevo_doc)
 
         if doc_list:
-            col_lista, col_limpiar = st.columns([4, 1])
-            col_lista.info("📋 " + ", ".join(doc_list))
-            if col_limpiar.button("🗑️ Limpiar lista"):
+            st.caption("📋 Estimates en la lista:")
+            for i, doc in enumerate(doc_list):
+                col_doc, col_del = st.columns([5, 1])
+                col_doc.write(doc)
+                if col_del.button("✕", key=f"del_forecast_doc_{i}_{doc}", help=f"Quitar {doc} de la lista"):
+                    doc_list.pop(i)
+                    st.session_state["forecast_doc_numbers"] = doc_list
+                    st.rerun()
+
+            if st.button("🗑️ Limpiar toda la lista"):
                 st.session_state["forecast_doc_numbers"] = []
                 st.rerun()
 
