@@ -1569,6 +1569,16 @@ with tab_forecast:
         if pendientes_transito.empty:
             st.caption("No hay nada pendiente en tránsito.")
         else:
+            pendientes_transito = pendientes_transito.copy()
+            fecha_envio_dt = pd.to_datetime(pendientes_transito["fecha_envio"], errors="coerce")
+            pendientes_transito["Días pendiente"] = (pd.Timestamp.now().normalize() - fecha_envio_dt).dt.days
+            pendientes_transito = pendientes_transito.sort_values("Días pendiente", ascending=False)
+            viejas = pendientes_transito[pendientes_transito["Días pendiente"] > 14]
+            if not viejas.empty:
+                st.warning(
+                    f"⚠️ {len(viejas)} entrada(s) llevan más de 2 semanas pendientes — vale la pena confirmar si de verdad siguen en camino: "
+                    + ", ".join(f"{r['proveedor']} / {r['producto']} ({int(r['Días pendiente'])}d)" for _, r in viejas.iterrows())
+                )
             st.dataframe(pendientes_transito, use_container_width=True, hide_index=True)
 
         with st.form("nueva_po_transito", clear_on_submit=True):

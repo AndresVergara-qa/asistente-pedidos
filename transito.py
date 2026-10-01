@@ -43,7 +43,13 @@ def _load():
 def _save(df):
     try:
         conn = get_gsheets_connection()
-        conn.update(worksheet=TRANSITO_WORKSHEET, data=df)
+        try:
+            conn.update(worksheet=TRANSITO_WORKSHEET, data=df)
+        except Exception:
+            # Primera vez que se usa: la pestaña "pos_transito" todavía no
+            # existe en el Google Sheet — se crea sola, no hace falta
+            # que el usuario la arme a mano.
+            conn.create(worksheet=TRANSITO_WORKSHEET, data=df)
         return True
     except Exception:
         return False
