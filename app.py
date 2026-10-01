@@ -329,6 +329,12 @@ def build_catalog_index(qb_df, prod_col):
     la app lenta con catálogos grandes (3000+ productos)."""
     return qb_df[prod_col].astype(str).apply(normalize)
 
+def _sku_loose_key(sku):
+    """Para comparar SKUs ignorando ceros a la izquierda (factura "00012" vs
+    catálogo "0012" deben matchear). Si no es puramente numérico, no cambia nada."""
+    s = str(sku).strip().upper()
+    return s.lstrip("0") or "0" if s.isdigit() else s
+
 def find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint="", catalog_norm=None):
     """
     Busca la mejor fila del catálogo para un producto extraído por la IA.
@@ -346,6 +352,16 @@ def find_best_match(qb_df, prod_col, sku_col, p_name, sku_hint="", catalog_norm=
         m = qb_df[qb_df[sku_col].astype(str).str.strip().str.upper() == sku_norm]
         if not m.empty:
             return m.iloc[0], "sku", None
+        # 1b. Si no hubo match exacto, comparar ignorando ceros a la izquierda — la
+        # factura/pedido a veces trae el SKU con un cero de más o de menos respecto
+        # al catálogo (ej. "00012" vs "0012"), y el SKU real del inventario siempre
+        # debe ganarle al que vino "crudo" de la imagen.
+        loose_target = _sku_loose_key(sku_norm)
+        if loose_target:
+            catalog_skus_loose = qb_df[sku_col].astype(str).apply(_sku_loose_key)
+            m = qb_df[catalog_skus_loose == loose_target]
+            if not m.empty:
+                return m.iloc[0], "sku", None
 
     if not p_norm:
         return None, "sin_match", None
@@ -1034,7 +1050,7 @@ with tab_ventas:
 
                         actual_pname, sku_val, desc_val, estado = resolve_item(
                             qb_df, prod_col, sku_col, sales_desc_col, p_name, sku_hint,
-                            catalog_norm=catalog_norm_idx
+                            catalog_norm=catalog_norm_idx, fallback_desc_col=purchase_desc_col
                         )
 
                         recalled_rate = sku_prices.get(sku_val, 0.0)
@@ -1153,7 +1169,7 @@ with tab_ventas:
             width="stretch", hide_index=True,
             key="ventas_editor",
         )
-        edited_df = sync_edited_rows(edited_df, "ventas_editor", "res_df", qb_df, prod_col, sku_col, sales_desc_col)
+        edited_df = sync_edited_rows(edited_df, "ventas_editor", "res_df", qb_df, prod_col, sku_col, sales_desc_col, fallback_desc_col=purchase_desc_col)
 
         if st.button("💾 Aprender y Guardar Precios"):
             save_price_memory(cliente_actual.strip(), edited_df)
