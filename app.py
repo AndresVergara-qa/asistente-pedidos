@@ -1559,7 +1559,7 @@ with tab_forecast:
         if doc_list:
             st.caption("📋 Estimates en la lista:")
             for i, doc in enumerate(doc_list):
-                col_doc, col_del = st.columns([5, 1])
+                col_doc, col_del, _ = st.columns([1, 1, 6])
                 col_doc.write(doc)
                 if col_del.button("✕", key=f"del_forecast_doc_{i}_{doc}", help=f"Quitar {doc} de la lista"):
                     doc_list.pop(i)
