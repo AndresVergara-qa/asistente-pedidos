@@ -93,12 +93,14 @@ def get_pending_qty_by_sku():
     return pend.groupby(pend["sku"].astype(str).str.strip().str.upper())["cantidad"].sum().to_dict()
 
 
-def auto_reconcile(proveedor, lineas_df, bill_id=""):
-    """Al crear un Bill, cierra automáticamente las entradas pendientes de
-    ese proveedor que coincidan por SKU (más antigua primero), descontando
-    la cantidad recibida. lineas_df necesita columnas 'SKU' y 'Qty' (las
-    mismas que ya usa create_bill). Devuelve cuántas entradas quedaron
-    totalmente cerradas."""
+def auto_reconcile(proveedor, lineas_df, bill_id="", bill_date=None):
+    """Cierra automáticamente las entradas pendientes de ese proveedor que
+    coincidan por SKU (más antigua primero), descontando la cantidad
+    recibida. lineas_df necesita columnas 'SKU' y 'Qty' (las mismas que ya
+    usa create_bill). Si se da bill_date, solo considera entradas enviadas
+    en o antes de esa fecha (no se puede recibir algo antes de pedirlo) —
+    evita que un Bill viejo cierre una PO que se mandó después. Devuelve
+    cuántas entradas quedaron totalmente cerradas."""
     df = _load()
     if df.empty:
         return 0
@@ -117,7 +119,10 @@ def auto_reconcile(proveedor, lineas_df, bill_id=""):
             (df["proveedor"].astype(str).str.strip().str.upper() == proveedor_norm)
             & (df["sku"].astype(str).str.strip().str.upper() == sku)
             & (df["estado"] == "pendiente")
-        ].sort_values("fecha_envio")
+        ]
+        if bill_date:
+            candidatos = candidatos[candidatos["fecha_envio"].astype(str) <= str(bill_date)]
+        candidatos = candidatos.sort_values("fecha_envio")
 
         for idx in candidatos.index:
             if qty_recibida <= 0:

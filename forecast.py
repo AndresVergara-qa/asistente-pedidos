@@ -19,9 +19,45 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+import qb_client
 import transito
 
 FALTANTE_RE = re.compile(r"Cant:\s*([\d.]+)")
+
+
+def reconcile_transito_with_quickbooks(qb_df):
+    """Revisa los Bills reales de QuickBooks (sin importar si se crearon
+    desde la pestaña Compras de esta app o directo en QuickBooks) y cierra
+    solas las entradas de tránsito que ya tengan Bill — así no depende de
+    que metas todas las Bills por la app. Devuelve cuántas se cerraron."""
+    pendientes = transito.load_transito_df()
+    pendientes = pendientes[pendientes["estado"] == "pendiente"] if not pendientes.empty else pendientes
+    if pendientes.empty:
+        return 0
+
+    since_date = pendientes["fecha_envio"].min()
+    bills = qb_client.fetch_bills(since_date=since_date)
+
+    catalog_by_id = {}
+    for _, row in qb_df.iterrows():
+        item_id = str(row.get("Item Id", "")).strip()
+        if item_id:
+            catalog_by_id[item_id] = str(row.get("SKU", "")).strip()
+
+    total_cerradas = 0
+    for bill in bills:
+        filas = [
+            {"SKU": catalog_by_id.get(str(ln["item_id"]), ""), "Qty": ln["qty"]}
+            for ln in bill["lines"]
+            if catalog_by_id.get(str(ln["item_id"]))
+        ]
+        if not filas:
+            continue
+        lineas_df = pd.DataFrame(filas)
+        total_cerradas += transito.auto_reconcile(
+            bill["vendor"], lineas_df, bill_id=bill["id"], bill_date=bill["txn_date"]
+        )
+    return total_cerradas
 
 
 def build_line_items(selected_estimates, qb_df):

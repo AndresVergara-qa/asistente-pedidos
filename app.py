@@ -1517,7 +1517,8 @@ with tab_compras:
                     with st.spinner("Creando Bill en QuickBooks..."):
                         bill = qb_client.create_bill(proveedor_actual.strip(), edited_compras_df, vendor_id=vendor_id_actual)
                         cerradas = transito.auto_reconcile(
-                            proveedor_actual.strip(), edited_compras_df, bill_id=bill.get("Id", "")
+                            proveedor_actual.strip(), edited_compras_df,
+                            bill_id=bill.get("Id", ""), bill_date=bill.get("TxnDate", "")
                         )
                     st.success(f"✅ Bill #{bill.get('DocNumber', bill.get('Id'))} creado en QuickBooks para {proveedor_actual.strip()}.")
                     if cerradas:
@@ -1533,8 +1534,8 @@ with tab_forecast:
         "Cruza los Estimates abiertos contra inventario y lo que está en tránsito para decidir qué pedir. "
         "Estimates e Inventory se traen en vivo de QuickBooks (el Estimate ya trae el producto/SKU resuelto "
         "desde que se creó — no hace falta volver a identificarlo con IA). Lo que está en tránsito se anota "
-        "aquí porque hoy no vive en ningún sistema; se va cerrando solo cuando entras la Bill correspondiente "
-        "en la pestaña Compras."
+        "aquí porque hoy no vive en ningún sistema; se va cerrando solo comparando contra los Bills reales de "
+        "QuickBooks — da igual si los metiste por esta app o directo en QuickBooks."
     )
 
     if not qb_connected:
@@ -1551,6 +1552,18 @@ with tab_forecast:
 
         st.divider()
         st.markdown("**📬 En tránsito (POs enviadas a proveedores, pendientes de recibir)**")
+        if qb_df is not None and "Item Id" in qb_df.columns:
+            if st.button("🔄 Revisar qué ya llegó (comparar contra Bills de QuickBooks)"):
+                try:
+                    with st.spinner("Comparando contra los Bills de QuickBooks..."):
+                        cerradas = forecast.reconcile_transito_with_quickbooks(qb_df)
+                    if cerradas:
+                        st.success(f"✅ Se cerraron {cerradas} entrada(s) — ya tenían Bill en QuickBooks.")
+                    else:
+                        st.info("Nada nuevo para cerrar — ninguna PO pendiente tiene Bill todavía.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ No se pudo comparar contra QuickBooks: {e}")
         transito_df = transito.load_transito_df()
         pendientes_transito = transito_df[transito_df["estado"] == "pendiente"] if not transito_df.empty else transito_df
         if pendientes_transito.empty:

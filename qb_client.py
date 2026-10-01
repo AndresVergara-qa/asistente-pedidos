@@ -308,6 +308,40 @@ def fetch_open_estimates():
 
 
 # =========================================================
+# BILLS (para reconciliar tránsito, sin importar si se crearon desde la
+# app o directo en QuickBooks)
+# =========================================================
+def fetch_bills(since_date=None):
+    """Trae los Bills de QuickBooks con sus líneas (item_id + qty) — da
+    igual si se crearon desde la pestaña Compras de esta app o a mano
+    directo en QuickBooks, porque se consulta la transacción real, no
+    algo que la app haya registrado. Si se da since_date ('YYYY-MM-DD'),
+    solo trae Bills con TxnDate >= esa fecha."""
+    query = "SELECT * FROM Bill MAXRESULTS 1000"
+    if since_date:
+        query = f"SELECT * FROM Bill WHERE TxnDate >= '{_escape_sql(since_date)}' MAXRESULTS 1000"
+    bills = _query(query).get("Bill", [])
+    out = []
+    for b in bills:
+        lines = []
+        for ln in b.get("Line", []):
+            detail = ln.get("ItemBasedExpenseLineDetail")
+            if detail and detail.get("ItemRef", {}).get("value"):
+                lines.append({
+                    "item_id": detail["ItemRef"]["value"],
+                    "qty": float(detail.get("Qty", 0) or 0),
+                })
+        out.append({
+            "id": b.get("Id", ""),
+            "doc_number": b.get("DocNumber", b.get("Id", "")),
+            "vendor": b.get("VendorRef", {}).get("name", ""),
+            "txn_date": b.get("TxnDate", ""),
+            "lines": lines,
+        })
+    return out
+
+
+# =========================================================
 # CLIENTES / PROVEEDORES (listar / buscar o crear)
 # =========================================================
 def list_customers():
