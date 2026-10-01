@@ -11,6 +11,8 @@ from PIL import Image
 from gsheets_utils import get_gsheets_connection
 import qb_client
 import gemini_cache
+import transito
+import forecast
 
 # =========================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -796,7 +798,9 @@ def tsv_from_df(df, cols, leading_blank=False):
 # =========================================================
 # PESTAÑAS PRINCIPALES
 # =========================================================
-tab_ventas, tab_compras = st.tabs(["🛒 Procesar Pedidos (Ventas)", "📦 Ingreso de Facturas (Compras)"])
+tab_ventas, tab_compras, tab_forecast = st.tabs([
+    "🛒 Procesar Pedidos (Ventas)", "📦 Ingreso de Facturas (Compras)", "📊 Forecast de Compras",
+])
 
 # =========================================================
 # PESTAÑA 1: VENTAS
@@ -1512,11 +1516,102 @@ with tab_compras:
                 try:
                     with st.spinner("Creando Bill en QuickBooks..."):
                         bill = qb_client.create_bill(proveedor_actual.strip(), edited_compras_df, vendor_id=vendor_id_actual)
+                        cerradas = transito.auto_reconcile(
+                            proveedor_actual.strip(), edited_compras_df, bill_id=bill.get("Id", "")
+                        )
                     st.success(f"✅ Bill #{bill.get('DocNumber', bill.get('Id'))} creado en QuickBooks para {proveedor_actual.strip()}.")
+                    if cerradas:
+                        st.info(f"📬 Se cerraron {cerradas} entrada(s) de 'en tránsito' que coincidían con este Bill.")
                 except Exception as e:
                     st.error(f"❌ No se pudo crear el Bill: {e}")
         else:
             st.caption("🔌 Conecta QuickBooks (barra lateral) para crear este Bill directamente, en vez de copiar y pegar.")
+
+with tab_forecast:
+    st.subheader("📊 Forecast de Compras")
+    st.caption(
+        "Cruza los Estimates abiertos contra inventario y lo que está en tránsito para decidir qué pedir. "
+        "Estimates e Inventory se traen en vivo de QuickBooks (el Estimate ya trae el producto/SKU resuelto "
+        "desde que se creó — no hace falta volver a identificarlo con IA). Lo que está en tránsito se anota "
+        "aquí porque hoy no vive en ningún sistema; se va cerrando solo cuando entras la Bill correspondiente "
+        "en la pestaña Compras."
+    )
+
+    if not qb_connected:
+        st.warning("🔌 Conecta QuickBooks (barra lateral) para usar el Forecast.")
+    else:
+        if st.button("🔄 Traer Estimates abiertos de QuickBooks"):
+            try:
+                with st.spinner("Consultando QuickBooks..."):
+                    st.session_state["forecast_estimates"] = qb_client.fetch_open_estimates()
+            except Exception as e:
+                st.error(f"❌ No se pudieron traer los Estimates: {e}")
+
+        estimates = st.session_state.get("forecast_estimates", [])
+
+        st.divider()
+        st.markdown("**📬 En tránsito (POs enviadas a proveedores, pendientes de recibir)**")
+        transito_df = transito.load_transito_df()
+        pendientes_transito = transito_df[transito_df["estado"] == "pendiente"] if not transito_df.empty else transito_df
+        if pendientes_transito.empty:
+            st.caption("No hay nada pendiente en tránsito.")
+        else:
+            st.dataframe(pendientes_transito, use_container_width=True, hide_index=True)
+
+        with st.form("nueva_po_transito", clear_on_submit=True):
+            col1, col2, col3, col4 = st.columns(4)
+            proveedor_t = col1.text_input("Proveedor")
+            producto_t = col2.text_input("Producto")
+            sku_t = col3.text_input("SKU")
+            cantidad_t = col4.number_input("Cantidad", min_value=0.0, step=1.0)
+            if st.form_submit_button("➕ Agregar a tránsito"):
+                if proveedor_t.strip() and sku_t.strip() and cantidad_t > 0:
+                    transito.add_entry(proveedor_t, producto_t, sku_t, cantidad_t)
+                    st.success("Agregado.")
+                    st.rerun()
+                else:
+                    st.warning("Proveedor, SKU y Cantidad son obligatorios.")
+
+        if not pendientes_transito.empty:
+            opciones_recibido = {
+                f"#{row['id']} — {row['proveedor']} / {row['producto']} ({row['sku']}) x{row['cantidad']:.0f}": row["id"]
+                for _, row in pendientes_transito.iterrows()
+            }
+            seleccionado = st.selectbox("Marcar como recibido manualmente", list(opciones_recibido.keys()))
+            if st.button("✅ Marcar como recibido"):
+                transito.mark_received(opciones_recibido[seleccionado])
+                st.success("Marcado como recibido.")
+                st.rerun()
+
+        st.divider()
+        if not estimates:
+            st.caption("Aún no has traído los estimates abiertos — dale clic a 'Traer Estimates abiertos de QuickBooks'.")
+        elif qb_df is None or "Item Id" not in qb_df.columns:
+            st.warning("⚠️ El Forecast necesita el catálogo traído de QuickBooks (no un archivo manual) — selecciona 'QuickBooks (automático)' en 'Origen del catálogo', en la barra lateral.")
+        else:
+            opciones = {f"Estimate {e['doc_number']} — {e['customer']} ({e['txn_date']})": e for e in estimates}
+            seleccion = st.multiselect("Estimates a incluir en este forecast", list(opciones.keys()))
+            selected_estimates = [opciones[s] for s in seleccion]
+
+            if selected_estimates and st.button("📈 Generar Forecast", type="primary"):
+                with st.spinner("Armando el forecast..."):
+                    detalle_df, pendientes_df = forecast.build_line_items(selected_estimates, qb_df)
+                    forecast_df, estimate_cols = forecast.build_forecast_table(detalle_df, qb_df)
+
+                if forecast_df.empty:
+                    st.warning("No hay líneas con producto de catálogo en los estimates seleccionados.")
+                else:
+                    st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+                    if not pendientes_df.empty:
+                        st.warning("⚠️ Estas líneas no se pudieron identificar contra el catálogo — revísalas a mano antes de sumarlas:")
+                        st.dataframe(pendientes_df, use_container_width=True, hide_index=True)
+                    excel_buf = forecast.export_excel(forecast_df, estimate_cols, pendientes_df)
+                    st.download_button(
+                        "⬇️ Descargar Forecast en Excel",
+                        data=excel_buf,
+                        file_name=f"forecast_compras_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
 
 st.divider()
 st.subheader("🧪 Módulo de Pruebas — Registrar Venta ya Pagada")

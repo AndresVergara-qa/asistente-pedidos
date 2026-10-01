@@ -254,8 +254,57 @@ def fetch_catalog_df():
             "SKU": it.get("Sku", "") or "",
             "Sales Description": it.get("Description", "") or "",
             "Purchase Description": it.get("PurchaseDesc", "") or "",
+            # Solo viene poblado para ítems con seguimiento de inventario
+            # (Type = Inventory) — para servicios/no-inventariables queda vacío.
+            "Qty On Hand": it.get("QtyOnHand", None),
+            "Item Id": it.get("Id", ""),
         })
     return pd.DataFrame(rows)
+
+
+# =========================================================
+# ESTIMATES ABIERTOS (demanda para el forecast de compras)
+# =========================================================
+def fetch_open_estimates():
+    """Trae los Estimates que todavía no están Closed/Rejected, con sus
+    líneas. Como el Estimate ya se creó apuntando a un Item real del
+    catálogo (ItemRef), no hace falta volver a identificar el producto —
+    solo cruzar ese ItemRef contra el catálogo para sacar el SKU real.
+    Las líneas que quedaron como texto libre (producto no encontrado en el
+    catálogo al crear el estimado) se marcan con 'sin_catalogar': True para
+    que se revisen a mano, en vez de inventarles una cantidad.
+    Devuelve una lista de dicts: {id, doc_number, customer, txn_date, lines}.
+    """
+    estimates = _query("SELECT * FROM Estimate MAXRESULTS 1000").get("Estimate", [])
+    out = []
+    for est in estimates:
+        if est.get("TxnStatus", "") in ("Closed", "Rejected"):
+            continue
+        lines = []
+        for ln in est.get("Line", []):
+            detail = ln.get("SalesItemLineDetail")
+            if detail and detail.get("ItemRef", {}).get("value"):
+                lines.append({
+                    "item_id": detail["ItemRef"]["value"],
+                    "product_name": detail["ItemRef"].get("name", ""),
+                    "qty": float(detail.get("Qty", 0) or 0),
+                    "sin_catalogar": False,
+                })
+            elif ln.get("DetailType") == "DescriptionOnly" and ln.get("Description"):
+                lines.append({
+                    "item_id": "",
+                    "product_name": ln["Description"],
+                    "qty": 0,
+                    "sin_catalogar": True,
+                })
+        out.append({
+            "id": est.get("Id", ""),
+            "doc_number": est.get("DocNumber", est.get("Id", "")),
+            "customer": est.get("CustomerRef", {}).get("name", ""),
+            "txn_date": est.get("TxnDate", ""),
+            "lines": lines,
+        })
+    return out
 
 
 # =========================================================
