@@ -133,6 +133,42 @@ def get_model_candidates(_api_key_hash, _v=6):
         pass
     return GEMINI_FALLBACK_PRIORITY
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_cache_model_candidates(_api_key_hash, _v=1):
+    """Como get_model_candidates, pero solo los modelos que soportan caché
+    explícito (createCachedContent). No todos lo soportan — un modelo nuevo
+    puede funcionar perfecto para llamadas normales y rechazar el caché."""
+    try:
+        available = [
+            m.name for m in genai.list_models()
+            if {"generateContent", "createCachedContent"} <= set(getattr(m, "supported_generation_methods", []))
+        ]
+        return sorted([m for m in available if _is_usable_model(m)], key=_priority_rank)
+    except Exception:
+        return []
+
+
+def get_catalog_cache(catalog_csv, reglas):
+    """Devuelve (cached_content, modelo) usando el modelo "de hoy" si soporta
+    caché, si no el siguiente que sí lo soporte. Si un modelo igual rechaza el
+    caché, prueba el siguiente (hasta 3) antes de rendirse."""
+    candidatos = get_cache_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
+    if not candidatos:
+        raise RuntimeError("ningún modelo disponible soporta caché")
+    preferred = pick_preferred_model(candidatos)
+    orden = ([preferred] if preferred in candidatos else []) + [m for m in candidatos if m != preferred]
+
+    ultimo_error = None
+    for model_name in orden[:3]:
+        try:
+            return gemini_cache.get_or_create_cache(catalog_csv, model_name, reglas), model_name
+        except Exception as e:
+            ultimo_error = e
+            if "not supported" not in str(e).lower():
+                raise
+    raise RuntimeError(f"ningún modelo aceptó el caché ({ultimo_error})")
+
+
 GEMINI_SETTINGS_WORKSHEET = "app_settings"
 
 
@@ -845,10 +881,6 @@ with tab_ventas:
                 t_antes_cache = time.perf_counter()
                 try:
                     catalog_csv = build_full_catalog_csv(qb_df, prod_col, sku_col, sales_desc_col, purchase_desc_col)
-                    candidatos_modelo = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
-                    cache_model = pick_preferred_model(candidatos_modelo) or (candidatos_modelo[0] if candidatos_modelo else None)
-                    if not cache_model:
-                        raise RuntimeError("no hay modelos disponibles para cachear")
 
                     reglas_producto = """
                     REGLAS DE PRODUCTOS:
@@ -860,7 +892,7 @@ with tab_ventas:
                     producto (tamaños, sabores, presentaciones). Compara letra por letra contra el
                     catálogo antes de responder y elige la fila que más se parezca, no la primera opción.
                     """
-                    cached_content = gemini_cache.get_or_create_cache(catalog_csv, cache_model, reglas_producto)
+                    cached_content, cache_model = get_catalog_cache(catalog_csv, reglas_producto)
                     cached_model_obj = genai.GenerativeModel.from_cached_content(cached_content)
 
                     prompt_pedido = f"""
@@ -1271,10 +1303,6 @@ with tab_compras:
                 t_antes_cache_c = time.perf_counter()
                 try:
                     catalog_csv = build_full_catalog_csv(qb_df, prod_col, sku_col, sales_desc_col, purchase_desc_col)
-                    candidatos_modelo = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
-                    cache_model = pick_preferred_model(candidatos_modelo) or (candidatos_modelo[0] if candidatos_modelo else None)
-                    if not cache_model:
-                        raise RuntimeError("no hay modelos disponibles para cachear")
 
                     reglas_compras = """
                     TAREAS:
@@ -1284,7 +1312,7 @@ with tab_compras:
                     3. Ten cuidado con productos parecidos entre sí (variantes orgánicas, tamaños,
                        sabores) — compara letra por letra antes de elegir.
                     """
-                    cached_content = gemini_cache.get_or_create_cache(catalog_csv, cache_model, reglas_compras)
+                    cached_content, cache_model = get_catalog_cache(catalog_csv, reglas_compras)
                     cached_model_obj = genai.GenerativeModel.from_cached_content(cached_content)
 
                     prompt_bill_cache = """
