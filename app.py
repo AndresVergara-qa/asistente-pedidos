@@ -13,6 +13,7 @@ import qb_client
 import gemini_cache
 import transito
 import forecast
+import etiquetas
 
 # =========================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -31,6 +32,11 @@ DEFAULT_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 if qb_client.is_configured() and qb_client.handle_oauth_callback():
     st.success("✅ QuickBooks conectado correctamente.")
     st.rerun()
+
+# Vista solo de etiquetas para el personal del almacén: <url de la app>/?vista=etiquetas
+if st.query_params.get("vista") == "etiquetas":
+    etiquetas.render(standalone=True)
+    st.stop()
 
 st.markdown("""
 <style>
@@ -833,8 +839,9 @@ def tsv_from_df(df, cols, leading_blank=False):
 # =========================================================
 # PESTAÑAS PRINCIPALES
 # =========================================================
-tab_ventas, tab_compras, tab_forecast = st.tabs([
+tab_ventas, tab_compras, tab_forecast, tab_etiquetas = st.tabs([
     "🛒 Procesar Pedidos (Ventas)", "📦 Ingreso de Facturas (Compras)", "📊 Forecast de Compras",
+    "🏷️ Etiquetas de Pallet",
 ])
 
 # =========================================================
@@ -1703,6 +1710,13 @@ with tab_forecast:
                         file_name=f"forecast_compras_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
+
+# =========================================================
+# PESTAÑA 4: ETIQUETAS DE PALLET (recepción)
+# =========================================================
+with tab_etiquetas:
+    st.caption("Para el almacén, comparte la app con `?vista=etiquetas` al final del link: abre solo esta pantalla.")
+    etiquetas.render()
 
 st.divider()
 st.subheader("🧪 Módulo de Pruebas — Registrar Venta ya Pagada")
