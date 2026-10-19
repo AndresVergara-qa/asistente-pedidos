@@ -517,8 +517,9 @@ def render(standalone=False):
 
     # 2. Qué trae
     st.markdown("**2 · Qué trae el pallet**")
-    foto = st.file_uploader("📷 Tomar foto del código de la caja", type=["jpg", "jpeg", "png", "webp"], key="etq_foto",
-                            help="En el celular abre la cámara. Toma la foto de cerca y con buena luz.")
+    foto = st.file_uploader("📷 Escanear caja con el teléfono: toca Browse files y elige Cámara",
+                            type=["jpg", "jpeg", "png", "webp"], key="etq_foto",
+                            help="Toma la foto de cerca al código de barras, con buena luz. La caja se suma sola.")
     if foto is not None and s["etq_last_photo"] != foto.file_id:
         s["etq_last_photo"] = foto.file_id
         code = decode_photo(foto.getvalue())
@@ -530,8 +531,9 @@ def render(standalone=False):
     def _on_scan():
         _handle_code(st.session_state.get("etq_scan", ""), codigos, sku_index)
         st.session_state["etq_scan"] = ""
-    st.text_input("🔫 Pistola o código a mano (Enter para agregar)", key="etq_scan", on_change=_on_scan,
-                  placeholder="Escanea con la pistola o escribe el código")
+    with st.expander("🔫 Pistola Bluetooth o escribir el código"):
+        st.text_input("Toca aquí y dispara la pistola, o escribe los números y dale Enter", key="etq_scan",
+                      on_change=_on_scan, placeholder="Solo números del código de barras")
 
     if s["etq_msg"]:
         tipo, txt = s["etq_msg"]
