@@ -7,3 +7,5 @@ Pillow
 st-gsheets-connection
 intuit-oauth
 requests
+python-barcode
+zxing-cpp
