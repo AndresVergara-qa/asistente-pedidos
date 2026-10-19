@@ -7,8 +7,9 @@ trae (productos y cajas). Pensado para usarse desde el celular:
 
 - Los productos se agregan escaneando la caja (pistola Bluetooth, que "escribe"
   el código en el campo de escaneo) o con una foto del código de barras.
-- El código de la caja se busca contra el SKU de QuickBooks. Si no coincide, se
-  elige el producto una vez y el código queda guardado (pestaña "codigos_cajas").
+- El código de la caja se busca contra el SKU del inventario de QuickBooks que
+  se sube en la app principal. Si no coincide, se elige el producto una vez y
+  el código queda guardado (pestaña "codigos_cajas").
 - Cada pallet queda en la pestaña "pallets" del mismo Google Sheet de la app.
 
 Con ?vista=etiquetas en la URL la app muestra solo esta pantalla (para el
@@ -24,7 +25,6 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
-import qb_client
 from gsheets_utils import get_gsheets_connection
 
 PALLETS_WORKSHEET = "pallets"
@@ -42,33 +42,65 @@ LABEL_W, LABEL_H = 4 * DPI, 6 * DPI
 
 
 # =========================================================
-# DATOS: QuickBooks
+# DATOS: catálogo de productos
 # =========================================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_inventory_items():
-    """Todos los items Inventory activos de QuickBooks (paginado: QBO devuelve
-    máximo 1000 por consulta y el catálogo tiene más de 3,000)."""
-    items, start = [], 1
-    while True:
-        page = qb_client._query(
-            "SELECT Id, Name, Sku, QtyOnHand, Type FROM Item "
-            f"WHERE Active = true STARTPOSITION {start} MAXRESULTS 1000"
-        ).get("Item", [])
-        items.extend(page)
-        if len(page) < 1000:
-            break
-        start += 1000
-    rows = [{
-        "producto": it.get("Name", ""),
-        "sku": (it.get("Sku") or "").strip(),
-        "qoh": float(it.get("QtyOnHand") or 0),
-    } for it in items if it.get("Type") == "Inventory"]
-    return pd.DataFrame(rows, columns=["producto", "sku", "qoh"])
+# La conexión de la app a QuickBooks es al ambiente de pruebas, así que la
+# lista de productos sale del inventario que se sube a mano en la app
+# principal. Al subirlo se guarda una copia en la pestaña "productos_etiquetas"
+# para que la vista del almacén (?vista=etiquetas) la tenga sin subir nada.
+PRODUCTOS_WORKSHEET = "productos_etiquetas"
+PRODUCTO_COLUMNS = ["producto", "sku", "qoh", "actualizado"]
+
+# Proveedores de mercancía de siempre; los que se escriban en "Otro" quedan en
+# el registro y salen primero la próxima vez.
+PROVEEDORES_BASE = ["American Bottling (KDP)", "Pepsi", "Gold Coast", "Millet", "BJ's", "Iberia", "Jetro"]
+
+QOH_COL_CANDIDATES = ["QUANTITY ON HAND", "QTY ON HAND", "QTY. ON HAND", "QUANTITY", "QTY", "QOH", "CANTIDAD"]
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_vendor_names():
-    return [v["DisplayName"] for v in qb_client.list_vendors()]
+def catalog_from_upload(qb_df, prod_col, sku_col):
+    """Reduce el inventario subido (export de QBO) a producto / sku / qoh."""
+    cols_upper = {str(c).strip().upper(): c for c in qb_df.columns}
+    qoh_col = next((cols_upper[k] for k in QOH_COL_CANDIDATES if k in cols_upper), None)
+    type_col = cols_upper.get("TYPE") or cols_upper.get("TIPO")
+    df = qb_df
+    if type_col:
+        tipo = df[type_col].astype(str).str.lower()
+        df = df[~tipo.str.contains("service|servicio|bundle|group|category|categor", regex=True)]
+    out = pd.DataFrame({
+        "producto": df[prod_col].astype(str).str.strip(),
+        "sku": df[sku_col].map(_text) if sku_col else "",
+        "qoh": pd.to_numeric(df[qoh_col], errors="coerce").fillna(0) if qoh_col else 0.0,
+    })
+    out = out[(out["producto"] != "") & (out["producto"].str.lower() != "nan")]
+    return out.drop_duplicates("producto").reset_index(drop=True)
+
+
+def sync_catalog(qb_df, prod_col, sku_col):
+    """Guarda en Sheets el inventario recién subido (solo si cambió)."""
+    if qb_df is None or qb_df.empty or not prod_col:
+        return
+    cat = catalog_from_upload(qb_df, prod_col, sku_col)
+    firma = pd.util.hash_pandas_object(cat, index=False).sum()
+    if st.session_state.get("etq_catalog_sig") == firma:
+        return
+    cat["sku"] = cat["sku"].map(lambda v: f"'{v}" if v else "")
+    cat["actualizado"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        _write_ws(PRODUCTOS_WORKSHEET, cat)
+        st.session_state["etq_catalog_sig"] = firma
+        load_catalog.clear()
+    except Exception as e:
+        st.warning(f"No pude guardar la lista de productos para las etiquetas: {e}")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_catalog():
+    df = _read_ws(PRODUCTOS_WORKSHEET, PRODUCTO_COLUMNS)
+    df["producto"] = df["producto"].astype(str).str.strip()
+    df["sku"] = df["sku"].map(_text)
+    df["qoh"] = pd.to_numeric(df["qoh"], errors="coerce").fillna(0.0)
+    return df[df["producto"] != ""].reset_index(drop=True)
 
 
 # =========================================================
@@ -449,18 +481,13 @@ def render(standalone=False):
     s = _ss()
     st.markdown("### 🏷️ Etiqueta de pallet (recepción)")
 
-    connected = qb_client.is_configured() and qb_client.is_connected()
-    if connected:
-        try:
-            with st.spinner("Cargando productos de QuickBooks..."):
-                items_df = fetch_inventory_items()
-            vendors = fetch_vendor_names()
-        except Exception as e:
-            st.error(f"No pude traer los productos de QuickBooks: {e}")
-            items_df, vendors = pd.DataFrame(columns=["producto", "sku", "qoh"]), []
+    catalog = load_catalog()
+    items_df = catalog[["producto", "sku", "qoh"]]
+    if items_df.empty:
+        st.warning("Todavía no hay lista de productos. Sube el inventario de QuickBooks en la barra lateral "
+                   "de la app principal (Archivo manual) y queda guardada para las etiquetas.")
     else:
-        st.warning("QuickBooks no está conectado: no hay lista de productos. Pide que lo conecten desde la app principal.")
-        items_df, vendors = pd.DataFrame(columns=["producto", "sku", "qoh"]), []
+        st.caption(f"Productos: {len(items_df):,} del inventario subido el {_text(catalog['actualizado'].iloc[0])}.")
 
     codigos = load_codigos()
     sku_index = build_sku_index(items_df)
@@ -468,7 +495,7 @@ def render(standalone=False):
 
     # Productos ordenados: primero los que tienen inventario, y se suman los aprendidos por código.
     prods = items_df.sort_values(["qoh", "producto"], ascending=[False, True])
-    opciones = [f"{r.producto}  ·  {r.qoh:,.0f} en QBO" if r.qoh > 0 else r.producto for r in prods.itertuples()]
+    opciones = [f"{r.producto}  ·  {r.qoh:,.0f} en inventario" if r.qoh > 0 else r.producto for r in prods.itertuples()]
     opcion_a_prod = dict(zip(opciones, zip(prods["producto"], prods["sku"])))
     for c in codigos.values():
         if c["producto"] not in set(prods["producto"]):
@@ -479,7 +506,7 @@ def render(standalone=False):
     # 1. Proveedor
     st.markdown("**1 · Proveedor**")
     recientes = [p for p in pallets_df.sort_values("fecha", ascending=False)["proveedor"].tolist() if p]
-    orden = list(dict.fromkeys(recientes + vendors))
+    orden = list(dict.fromkeys(recientes + PROVEEDORES_BASE))
     prov_sel = st.selectbox("Proveedor", ["Elige o busca…"] + orden + ["Otro (escribirlo)"], key="etq_prov_sel",
                             label_visibility="collapsed")
     proveedor = ""

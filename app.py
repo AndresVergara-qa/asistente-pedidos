@@ -1715,6 +1715,8 @@ with tab_forecast:
 # PESTAÑA 4: ETIQUETAS DE PALLET (recepción)
 # =========================================================
 with tab_etiquetas:
+    if origen_catalogo == "Archivo manual":
+        etiquetas.sync_catalog(qb_df, prod_col, sku_col)
     st.caption("Para el almacén, comparte la app con `?vista=etiquetas` al final del link: abre solo esta pantalla.")
     etiquetas.render()
 
