@@ -23,6 +23,7 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, ImageDraw, ImageFont
 
 from gsheets_utils import get_gsheets_connection
@@ -36,6 +37,9 @@ CODIGO_COLUMNS = ["codigo", "producto", "sku", "fecha"]
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_REG = os.path.join(BASE_DIR, "assets", "fonts", "DejaVuSans.ttf")
 FONT_BOLD = os.path.join(BASE_DIR, "assets", "fonts", "DejaVuSans-Bold.ttf")
+
+# Lector en vivo con la cámara del teléfono (components/escaner/index.html).
+_escaner = components.declare_component("escaner_codigos", path=os.path.join(BASE_DIR, "components", "escaner"))
 
 DPI = 203  # resolución típica de impresoras térmicas 4x6
 LABEL_W, LABEL_H = 4 * DPI, 6 * DPI
@@ -438,6 +442,7 @@ def _ss():
     s.setdefault("etq_pending", None)     # código escaneado que no se conoce
     s.setdefault("etq_msg", None)         # (tipo, texto)
     s.setdefault("etq_last_photo", None)
+    s.setdefault("etq_cam_n", None)       # última lectura de la cámara en vivo ya procesada
     s.setdefault("etq_result", None)      # lista de dicts de etiquetas recién generadas
     s.setdefault("etq_ver", 0)            # cambia cuando el código modifica las cajas (refresca los inputs)
     return s
@@ -517,22 +522,27 @@ def render(standalone=False):
 
     # 2. Qué trae
     st.markdown("**2 · Qué trae el pallet**")
-    foto = st.file_uploader("📷 Escanear caja con el teléfono: toca Browse files y elige Cámara",
-                            type=["jpg", "jpeg", "png", "webp"], key="etq_foto",
-                            help="Toma la foto de cerca al código de barras, con buena luz. La caja se suma sola.")
-    if foto is not None and s["etq_last_photo"] != foto.file_id:
-        s["etq_last_photo"] = foto.file_id
-        code = decode_photo(foto.getvalue())
-        if code:
-            _handle_code(code, codigos, sku_index)
-        else:
-            s["etq_msg"] = ("warning", "No pude leer el código en la foto. Acércate más, con buena luz y el código derecho.")
+    lectura = _escaner(key="etq_cam", default=None)
+    if lectura and lectura.get("n") != s["etq_cam_n"]:
+        s["etq_cam_n"] = lectura.get("n")
+        _handle_code(str(lectura.get("code", "")), codigos, sku_index)
 
-    def _on_scan():
-        _handle_code(st.session_state.get("etq_scan", ""), codigos, sku_index)
-        st.session_state["etq_scan"] = ""
-    with st.expander("🔫 Pistola Bluetooth o escribir el código"):
-        st.text_input("Toca aquí y dispara la pistola, o escribe los números y dale Enter", key="etq_scan",
+    with st.expander("Otras formas: foto, pistola Bluetooth o escribir el código"):
+        foto = st.file_uploader("📷 Foto del código (si la cámara en vivo no abre)",
+                                type=["jpg", "jpeg", "png", "webp"], key="etq_foto",
+                                help="Toma la foto de cerca al código de barras, con buena luz. La caja se suma sola.")
+        if foto is not None and s["etq_last_photo"] != foto.file_id:
+            s["etq_last_photo"] = foto.file_id
+            code = decode_photo(foto.getvalue())
+            if code:
+                _handle_code(code, codigos, sku_index)
+            else:
+                s["etq_msg"] = ("warning", "No pude leer el código en la foto. Acércate más, con buena luz y el código derecho.")
+
+        def _on_scan():
+            _handle_code(st.session_state.get("etq_scan", ""), codigos, sku_index)
+            st.session_state["etq_scan"] = ""
+        st.text_input("🔫 Pistola Bluetooth: toca aquí y dispara. O escribe los números y dale Enter", key="etq_scan",
                       on_change=_on_scan, placeholder="Solo números del código de barras")
 
     if s["etq_msg"]:

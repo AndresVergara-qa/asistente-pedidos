@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; font-family: "Source Sans Pro", sans-serif; }
+  #btn { width: 100%; padding: 14px; font-size: 17px; font-weight: 600; border: 0; border-radius: 8px;
+         background: #ff4b4b; color: #fff; cursor: pointer; }
+  #btn.on { background: #555; }
+  #wrap { position: relative; display: none; margin-top: 8px; }
+  video { width: 100%; max-height: 280px; object-fit: cover; border-radius: 8px; background: #000; display: block; }
+  #guia { position: absolute; left: 10%; right: 10%; top: 50%; height: 0; border-top: 2px solid #ff4b4b;
+          box-shadow: 0 0 6px #ff4b4b; }
+  #wrap.ok #guia { border-color: #21c354; box-shadow: 0 0 10px #21c354; }
+  #estado { margin-top: 6px; font-size: 15px; min-height: 20px; color: #555; }
+  #wrap.ok + #estado { color: #138a3c; font-weight: 600; }
+</style>
+</head>
+<body>
+<button id="btn">📷 Abrir cámara para escanear</button>
+<div id="wrap"><video id="video" muted playsinline autoplay></video><div id="guia"></div></div>
+<div id="estado"></div>
+<script src="zxing.min.js"></script>
+<script>
+// Lector de códigos en vivo con la cámara trasera del teléfono. Cada código
+// leído se manda a Python como {code, n} (n cambia en cada lectura para que la
+// misma caja escaneada dos veces cuente dos veces).
+const ESPERA_MS = 1200;  // pausa mínima entre lecturas
+const HUECO_MS = 900;    // el mismo código solo vuelve a contar si salió de la cámara al menos este tiempo
+let ultimoCodigo = null, ultimaVista = 0;
+const btn = document.getElementById("btn"), wrap = document.getElementById("wrap");
+const video = document.getElementById("video"), estado = document.getElementById("estado");
+let stream = null, activo = false, pausaHasta = 0, n = Date.now();
+
+function send(type, data) {
+  window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data), "*");
+}
+function altura() { send("streamlit:setFrameHeight", { height: document.body.scrollHeight + 4 }); }
+
+function leido(code) {
+  const ahora = Date.now();
+  if (!activo || (ahora < pausaHasta && code !== ultimoCodigo)) return;
+  const mismaCaja = code === ultimoCodigo && ahora - ultimaVista < HUECO_MS;
+  ultimoCodigo = code; ultimaVista = ahora;
+  if (mismaCaja || ahora < pausaHasta) return;
+  pausaHasta = ahora + ESPERA_MS;
+  n += 1;
+  send("streamlit:setComponentValue", { value: { code, n }, dataType: "json" });
+  if (navigator.vibrate) navigator.vibrate(120);
+  wrap.classList.add("ok");
+  estado.textContent = "✓ Leído " + code;
+  setTimeout(() => { wrap.classList.remove("ok"); if (activo) estado.textContent = "Apunta al código de la siguiente caja"; }, ESPERA_MS);
+}
+
+async function loopNativo(detector) {
+  while (activo) {
+    try {
+      if (video.readyState >= 2) {
+        const codes = await detector.detect(video);
+        if (codes.length) leido(codes[0].rawValue);
+      }
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 120));
+  }
+}
+
+// Para iPhone y navegadores sin BarcodeDetector: se copia el cuadro de video a
+// un canvas y se lee con ZXing.
+async function loopZXing() {
+  const Z = window.ZXing;
+  const hints = new Map();
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A,
+    Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.ITF, Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39]);
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  const reader = new Z.MultiFormatReader();
+  reader.setHints(hints);
+  const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
+  while (activo) {
+    if (video.readyState >= 2 && video.videoWidth) {
+      const k = Math.min(1, 960 / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * k); canvas.height = Math.round(video.videoHeight * k);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      try {
+        const bmp = new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(canvas)));
+        leido(reader.decode(bmp).getText());
+      } catch (e) {}
+    }
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
+async function abrir() {
+  estado.textContent = "Abriendo cámara…"; altura();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (e) {
+    estado.textContent = "No pude abrir la cámara. Dale permiso de cámara a esta página en el navegador y vuelve a intentar.";
+    altura(); return;
+  }
+  activo = true;
+  wrap.style.display = "block"; btn.textContent = "⏹ Cerrar cámara"; btn.classList.add("on");
+  estado.textContent = "Apunta al código de barras de la caja";
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) {}
+  altura();
+  let nativo = null;
+  if ("BarcodeDetector" in window) {
+    try {
+      const soportados = await BarcodeDetector.getSupportedFormats();
+      const quiero = ["ean_13", "ean_8", "upc_a", "upc_e", "itf", "code_128", "code_39"].filter(f => soportados.includes(f));
+      if (quiero.length) nativo = new BarcodeDetector({ formats: quiero });
+    } catch (e) {}
+  }
+  if (nativo) loopNativo(nativo); else loopZXing();
+}
+
+function cerrar() {
+  activo = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  wrap.style.display = "none"; btn.textContent = "📷 Abrir cámara para escanear"; btn.classList.remove("on");
+  estado.textContent = ""; altura();
+}
+
+btn.addEventListener("click", () => activo ? cerrar() : abrir());
+window.addEventListener("message", (ev) => { if (ev.data && ev.data.type === "streamlit:render") altura(); });
+send("streamlit:componentReady", { apiVersion: 1 });
+altura();
+</script>
+</body>
+</html>
