@@ -1,6 +1,7 @@
+/** @OnlyCurrentDoc */
+// Con la línea de arriba, Google pide permiso solo sobre este Google Sheet, no sobre todos.
+
 /**
- * @OnlyCurrentDoc  (pide permiso solo sobre este Google Sheet, no sobre todos)
- *
  * Etiquetas de pallet: la "base de datos" de la página docs/index.html vive en
  * el mismo Google Sheet que usa asistente-pedidos, en tres pestañas:
  *   - pallets              una fila por pallet (mismas columnas que la pestaña de Streamlit)
