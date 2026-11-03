@@ -93,6 +93,11 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 #cam .estado{font:600 17px var(--body);min-height:1.4em}
 #cam.ok .estado{color:#5fe08a}
 #cam .camtot{font:700 18px var(--display);letter-spacing:.03em;color:#cfd2cb}
+#cam .ultimo{display:flex;align-items:center;gap:10px;background:#183d24;border:1px solid #2f7a45;border-radius:10px;padding:10px 12px;font:600 16px var(--body);color:#c9f5d6}
+#cam .ultimo[hidden]{display:none}
+#cam .ultimo span{flex:1;min-width:0}
+#cam .ultimo button{font:600 14px var(--body);text-transform:none;letter-spacing:0;padding:8px 12px;flex:none}
+#cam .camnota{font:400 13px var(--body);color:#9a9d96}
 #cam .cambtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #cam button.alt{background:transparent;color:#fff;border:1px solid #777}
 #cam .camtop{position:absolute;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-start;gap:8px}
@@ -224,8 +229,10 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
   </div>
   <div class="bar">
     <div class="estado" id="cam-estado">Abriendo cámara…</div>
+    <div class="ultimo" id="cam-ultimo" hidden><span id="cam-ultimo-txt"></span><button id="cam-deshacer" class="alt">Quitar 1</button></div>
     <div class="camtot" id="cam-tot"></div>
-    <div class="cambtns"><button id="cam-foto" class="alt">No lee: tomar foto</button><button id="cam-close">Listo</button></div>
+    <div class="camnota" id="cam-nota">Cada caja se suma sola al leerla. No hace falta tocar nada.</div>
+    <div class="cambtns"><button id="cam-foto" class="alt">No lee: tomar foto</button><button id="cam-close">Cerrar cámara</button></div>
   </div>
 </div>
 <div id="print"></div>
@@ -410,7 +417,7 @@ function handleScan(raw){
   if(/^CD-\d{6}-/i.test(raw)){ cerrarCamara(); openById(raw.toUpperCase()); return null; }
   const d=codeKey(raw); if(d.length<(/^\d+$/.test(d)?6:4)){ setScanMsg(msg,`El código ${raw} no parece de una caja. Intenta otra vez.`,"warn"); return null; }
   const hit=lookup(d);
-  if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; const t=`+1 ${hit.name} (van ${state.lines[i].qty})`; setScanMsg(msg,t,"ok"); return t; }
+  if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; ultimoAgregado=hit.name; const t=`+1 ${hit.name} (van ${state.lines[i].qty})`; setScanMsg(msg,t,"ok"); return t; }
   pendingCode=d; const last=state.lines[state.lines.length-1]; if(last.desc||last.qty) state.lines.push({qty:"1",desc:"",sku:""}); else last.qty="1";
   renderLines(); updTotal(); cerrarCamara(); const i=state.lines.length-1; $("#desc"+i).focus();
   setScanMsg(msg,`El código ${d} todavía no está guardado. Busca el producto abajo y tócalo: la próxima vez saldrá solo.`,"warn");
@@ -445,13 +452,35 @@ function leidoCamara(code){
   pausaHasta=ahora+ESPERA_MS;
   if(navigator.vibrate) navigator.vibrate(120);
   if(camModo==="log"){ cerrarCamara(); $("#q").value=code; findPallet(code); return; }
-  const t=handleScan(code); if(!camActiva) return;
-  $("#cam").classList.add("ok"); $("#cam-estado").textContent=t||`Leído ${code}`;
-  $("#cam-tot").textContent=`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`;
-  setTimeout(()=>{ $("#cam").classList.remove("ok"); if(camActiva) $("#cam-estado").textContent="Apunta al código de la siguiente caja"; },ESPERA_MS);
+  ultimoAgregado=null; const t=handleScan(code); if(!camActiva) return;
+  if(ultimoAgregado){ pitido(); ultimaSuma=ultimoAgregado; } $("#cam-deshacer").hidden=!ultimaSuma;
+  // Lo último que se sumó queda fijo en pantalla hasta la siguiente caja: ya está en el pallet.
+  $("#cam-ultimo").hidden=!t; if(t) $("#cam-ultimo-txt").textContent="✓ "+t.replace(/^\+1 /,"Sumada: ");
+  $("#cam").classList.add("ok"); $("#cam-estado").textContent="Apunta al código de la siguiente caja";
+  camTotal();
+  setTimeout(()=>{ $("#cam").classList.remove("ok"); },ESPERA_MS);
 }
+let ultimaSuma=null, ultimoAgregado=null, audio=null;
+function camTotal(){ $("#cam-tot").textContent=`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`; }
+function pitido(){
+  try{ if(!audio) return; const o=audio.createOscillator(), g=audio.createGain(); o.frequency.value=1250; g.gain.value=0.15;
+    o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime+0.09); }catch(e){}
+}
+$("#cam-deshacer").onclick=()=>{
+  const i=state.lines.findIndex(l=>l.desc===ultimaSuma); if(i<0){ $("#cam-ultimo").hidden=true; return; }
+  const q=(parseFloat(state.lines[i].qty)||0)-1;
+  if(q>0) state.lines[i].qty=String(q); else { state.lines.splice(i,1); if(!state.lines.length) state.lines.push({qty:"",desc:"",sku:""}); }
+  renderLines(); updTotal(); camTotal();
+  $("#cam-ultimo-txt").textContent=`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`;
+  setScanMsg($("#scanmsg"),`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`,"ok");
+  if(q<=0){ ultimaSuma=null; $("#cam-deshacer").hidden=true; }
+};
 async function loopNativo(det){ const v=$("#video");
-  while(camActiva){ try{ if(v.readyState>=2){ const c=await det.detect(v); const ok=c.find(x=>x.format!=="itf"||/^\d{14}$/.test(x.rawValue)); if(ok) leidoCamara(ok.rawValue); } }catch(e){} await new Promise(r=>setTimeout(r,120)); } }
+  while(camActiva){ try{ if(v.readyState>=2&&v.videoWidth){
+      const src=typeof createImageBitmap==="function"?await createImageBitmap(v):v;
+      let c; try{ c=await det.detect(src); } finally { if(src.close) src.close(); }
+      const ok=c.find(x=>x.format!=="itf"||/^\d{14}$/.test(x.rawValue)); if(ok) leidoCamara(ok.rawValue); } }catch(e){}
+    await new Promise(r=>setTimeout(r,150)); } }
 // Lector de códigos: zxing-cpp compilado a WebAssembly (lee mucho mejor que la versión JavaScript,
 // sobre todo códigos pequeños o borrosos). El .wasm va en vendor/, junto a la página.
 // Solo los tipos de código que traen las cajas: con todos los tipos lineales, las rayas de una mesa o
@@ -465,25 +494,50 @@ function prepararLector(){
   return wasmListo;
 }
 async function leerImagen(imgData){ const r=await ZXingWASM.readBarcodes(imgData,LEER); const ok=r.find(x=>x.text); return ok?ok.text:null; }
-async function loopWasm(){
-  const v=$("#video"); const cv=document.createElement("canvas"), ctx=cv.getContext("2d",{willReadFrequently:true});
-  try{ await prepararLector(); }catch(e){ return; }
+// En vivo se lee en un Worker (segundo plano) para que el video no se trabe: el cuadro sale del video
+// con createImageBitmap y el Worker lo recorta y lo lee. Si el teléfono no puede, se hace aquí mismo.
+let lector=null, lectorN=0, conBitmap=typeof createImageBitmap==="function"; const lectorPend=new Map();
+function sinLector(){ lector=false; lectorPend.forEach(f=>f({text:null})); lectorPend.clear(); }
+function alLector(msg,transfer){
+  if(lector===null){
+    try{ lector=new Worker("lector-worker.js"); lector.postMessage({opciones:LEER});
+      lector.onmessage=e=>{ const f=lectorPend.get(e.data.id); if(f){ lectorPend.delete(e.data.id); f(e.data); } };
+      lector.onerror=sinLector;
+    }catch(e){ lector=false; }
+  }
+  if(lector===false) return null;
+  return new Promise(res=>{ const id=++lectorN; lectorPend.set(id,res); lector.postMessage(Object.assign({id},msg),transfer); });
+}
+const cvVivo=document.createElement("canvas"), ctxVivo=cvVivo.getContext("2d",{willReadFrequently:true});
+async function leerCuadro(v,banda){
+  const vw=v.videoWidth, vh=v.videoHeight;
+  if(conBitmap&&lector!==false){
+    const bmp=await createImageBitmap(v); const r=await alLector({bmp,banda},[bmp]);
+    if(r&&!r.sinCanvas) return r.text;
+    if(r&&r.sinCanvas) conBitmap=false; else return null;
+  }
+  // Sin Worker o sin OffscreenCanvas: se recorta aquí (más lento).
+  if(banda){ const bh=Math.round(vh*0.4); cvVivo.width=vw; cvVivo.height=bh; ctxVivo.drawImage(v,0,(vh-bh)/2,vw,bh,0,0,vw,bh); }
+  else { const k=Math.min(1,1280/vw); cvVivo.width=Math.round(vw*k); cvVivo.height=Math.round(vh*k); ctxVivo.drawImage(v,0,0,cvVivo.width,cvVivo.height); }
+  const img=ctxVivo.getImageData(0,0,cvVivo.width,cvVivo.height);
+  const r=await alLector({img},[img.data.buffer]); if(r) return r.text;
+  await prepararLector(); return leerImagen(img);
+}
+async function loopWasm(conNativo){
+  const v=$("#video");
+  // Con el lector propio del teléfono (Android) este va más despacio, solo de apoyo.
+  const cada=conNativo?300:150;
   let vuelta=0;
   while(camActiva){
-    if(v.readyState>=2&&v.videoWidth){
-      const vw=v.videoWidth, vh=v.videoHeight;
-      // Se alterna: la franja del centro (donde está la línea) a resolución completa, para códigos
-      // pequeños o de barras finas, y el cuadro entero reducido, para códigos grandes o torcidos.
-      if(vuelta++%2===0){ const bh=Math.round(vh*0.4); cv.width=vw; cv.height=bh; ctx.drawImage(v,0,(vh-bh)/2,vw,bh,0,0,vw,bh); }
-      else { const k=Math.min(1,1280/vw); cv.width=Math.round(vw*k); cv.height=Math.round(vh*k); ctx.drawImage(v,0,0,cv.width,cv.height); }
-      try{ const t=await leerImagen(ctx.getImageData(0,0,cv.width,cv.height)); if(t) leidoCamara(t); }catch(e){}
-    }
-    await new Promise(r=>setTimeout(r,100));
+    // Se alterna: la franja del centro (donde está la línea) a resolución completa, para códigos
+    // pequeños o de barras finas, y el cuadro entero reducido, para códigos grandes o torcidos.
+    if(v.readyState>=2&&v.videoWidth){ try{ const t=await leerCuadro(v,vuelta++%2===0); if(t) leidoCamara(t); }catch(e){} }
+    await new Promise(r=>setTimeout(r,cada));
   }
 }
-// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo sale a 1080p o menos. Por eso se pide
-// la mayor resolución que dé el teléfono (hasta 4K) y zoom, que deja leer barras finas sin pegar el
-// teléfono a la caja (de muy cerca pierde el foco). La cámara elegida con "Cambiar cámara" se recuerda.
+// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo sale a 1080p. El zoom (2× al abrir)
+// deja leer barras finas sin pegar el teléfono a la caja (de muy cerca pierde el foco). Con 4K el video
+// iba lento en el teléfono, así que se pide 1080p. La cámara elegida con "Cambiar cámara" se recuerda.
 let camZoom=null, camLuz=false, camLista=[];
 function camTrack(){ return camStream?camStream.getVideoTracks()[0]:null; }
 async function ponerZoom(z){
@@ -507,7 +561,7 @@ async function listarCamaras(){
 }
 async function iniciarStream(deviceId){
   if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
-  const res={width:{ideal:3840},height:{ideal:2160}};
+  const res={width:{ideal:1920},height:{ideal:1080}};
   const video=deviceId?Object.assign({deviceId:{exact:deviceId}},res):Object.assign({facingMode:{ideal:"environment"}},res);
   try{ camStream=await navigator.mediaDevices.getUserMedia({video,audio:false}); }
   catch(e){ if(!deviceId) throw e; store.set("etq_cam",""); return iniciarStream(null); }
@@ -521,7 +575,9 @@ async function iniciarStream(deviceId){
   await listarCamaras(); infoCamara();
 }
 async function abrirCamara(modo){
-  camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok"); prepararLector().catch(()=>{});
+  camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok");
+  try{ if(!audio) audio=new (window.AudioContext||window.webkitAudioContext)(); if(audio.state==="suspended") audio.resume(); }catch(e){ audio=null; }
+  $("#cam-ultimo").hidden=true; $("#cam-deshacer").hidden=false; ultimaSuma=null; $("#cam-nota").hidden=modo!=="cajas";
   $("#cam-info").textContent=""; ["#cam-zoom","#cam-luz","#cam-cambiar"].forEach(s=>$(s).hidden=true);
   $("#cam-estado").textContent="Abriendo cámara…"; $("#cam-tot").textContent= modo==="cajas"?`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`:"Apunta al código de barras de la etiqueta";
   try{ await iniciarStream(store.get("etq_cam")||null); }
@@ -531,7 +587,7 @@ async function abrirCamara(modo){
   let det=null;
   if("BarcodeDetector" in window){ try{ const sop=await BarcodeDetector.getSupportedFormats(); const f=["ean_13","ean_8","upc_a","upc_e","itf","code_128","code_39"].filter(x=>sop.includes(x)); if(f.length) det=new BarcodeDetector({formats:f}); }catch(e){} }
   if(det) loopNativo(det);
-  loopWasm();
+  loopWasm(!!det);
 }
 function cerrarCamara(){
   camActiva=false; if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
