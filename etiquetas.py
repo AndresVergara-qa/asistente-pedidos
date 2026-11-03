@@ -351,17 +351,23 @@ def render_label(p):
     foot_h = 86
     c_h = H - M - foot_h - y
     box(M, y, W - 2 * M, c_h)
-    d.rectangle([M, y, W - M, y + 40], fill="black")
-    d.text((M + 16, y + 8), "CAJAS", font=lab, fill="white")
-    d.text((M + 150, y + 8), "PRODUCTO", font=lab, fill="white")
+    # Encabezado con el número de pallet, para que se entienda que las cajas
+    # de abajo son las de ESTE pallet y no las de todo el lote.
+    n, lote = int(p.get("pallet_n") or 1), int(p.get("pallets_lote") or 1)
+    titulo = f"CONTENIDO DEL PALLET #{n}" + (f" DE {lote}" if lote > 1 else "")
+    d.rectangle([M, y, W - M, y + 50], fill="black")
+    d.text((M + 16, y + 8), titulo, font=_fit(d, titulo, W - 2 * M - 32, 32), fill="white")
+    d.text((M + 16, y + 58), "CAJAS", font=lab, fill="black")
+    d.text((M + 150, y + 58), "PRODUCTO", font=lab, fill="black")
+    d.line([M + 8, y + 88, W - M - 8, y + 88], fill="black", width=2)
     items = p["items"]
     for fs in range(30, 17, -2):
         f = _font(fs, False)
         rows = [(it["cajas"], _wrap(d, str(it["producto"]).upper(), f, W - 2 * M - 170)) for it in items]
         need = sum(len(r[1]) * (fs + 8) + 10 for r in rows)
-        if need <= c_h - 54:
+        if need <= c_h - 100:
             break
-    ry = y + 50
+    ry = y + 98
     for cajas, lines in rows:
         if ry > y + c_h - fs:
             break
@@ -376,7 +382,7 @@ def render_label(p):
     # Pie: total
     y = H - M - foot_h
     box(M, y, W - 2 * M, foot_h)
-    d.text((M + 16, y + 32), "TOTAL CAJAS", font=lab, fill="black")
+    d.text((M + 16, y + 32), f"TOTAL CAJAS DEL PALLET #{n}", font=lab, fill="black")
     tot = f"{float(p['total_cajas']):,.0f}" if float(p["total_cajas"]).is_integer() else f"{float(p['total_cajas']):,.1f}"
     f = _font(56, True)
     d.text((W - M - 16 - d.textlength(tot, font=f), y + 12), tot, font=f, fill="black")
