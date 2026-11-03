@@ -1,5 +1,5 @@
 // Lector de códigos en segundo plano (Web Worker): así leer cada cuadro no traba el video de la cámara.
-// Recibe el cuadro del video (ImageBitmap), lo recorta aquí y lo lee con zxing-wasm.
+// Recibe el cuadro del video (ImageBitmap) y la zona a leer, la recorta aquí y la lee con zxing-wasm.
 importScripts("vendor/zxing-wasm-reader.js");
 const listo = ZXingWASM.prepareZXingModule({
   overrides: { locateFile: (path, prefix) => path.endsWith(".wasm") ? new URL("vendor/" + path, self.location.href).href : prefix + path },
@@ -7,20 +7,16 @@ const listo = ZXingWASM.prepareZXingModule({
 });
 let leer = {}, cv = null, ctx = null;
 
-function recortar(bmp, banda) {
+function recortar(bmp, z, escala) {
   if (typeof OffscreenCanvas === "undefined") return null;
-  const vw = bmp.width, vh = bmp.height;
   if (!cv) { cv = new OffscreenCanvas(1, 1); ctx = cv.getContext("2d", { willReadFrequently: true }); }
   if (!ctx) return null;
-  if (banda) {
-    // La franja del centro, donde está la línea roja, a resolución completa.
-    const bh = Math.round(vh * 0.4); cv.width = vw; cv.height = bh;
-    ctx.drawImage(bmp, 0, Math.round((vh - bh) / 2), vw, bh, 0, 0, vw, bh);
-  } else {
-    // El cuadro entero, reducido a 1280 de ancho como máximo.
-    const k = Math.min(1, 1280 / vw); cv.width = Math.round(vw * k); cv.height = Math.round(vh * k);
-    ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
-  }
+  // z = [x, y, ancho, alto] de la zona a leer (la página dice cuál). "escala": el cuadro entero se reduce
+  // a 1280 de ancho como máximo; las franjas se leen a resolución completa.
+  const [x, y, w, h] = z || [0, 0, bmp.width, bmp.height];
+  const k = escala ? Math.min(1, 1280 / w) : 1;
+  cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  ctx.drawImage(bmp, x, y, w, h, 0, 0, cv.width, cv.height);
   return ctx.getImageData(0, 0, cv.width, cv.height);
 }
 
@@ -32,12 +28,12 @@ function vacio(img) {
 }
 
 onmessage = async (e) => {
-  const { id, img, bmp, banda, opciones } = e.data;
+  const { id, img, bmp, zona, escala, opciones } = e.data;
   if (opciones) { leer = opciones; return; }
   try {
     let data = img;
     if (bmp) {
-      data = recortar(bmp, banda); bmp.close();
+      data = recortar(bmp, zona, escala); bmp.close();
       if (!data) { postMessage({ id, text: null, sinCanvas: true }); return; }
       if (vacio(data)) { postMessage({ id, text: null, vacio: true }); return; }
     }
