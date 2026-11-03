@@ -155,7 +155,7 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
         <div class="step">2 · Qué trae el pallet</div>
         <button class="camera" id="cam-cajas">📷 Escanear cajas con la cámara</button>
         <div class="scanbar">
-          <input id="scan" placeholder="Pistola o código a mano" autocomplete="off" inputmode="numeric" enterkeyhint="done" aria-label="Código de la caja">
+          <input id="scan" placeholder="Pistola o código a mano" autocomplete="off" autocapitalize="characters" enterkeyhint="done" aria-label="Código de la caja">
           <button class="scanbtn" id="scanok">Agregar</button>
         </div>
         <div class="scanmsg" id="scanmsg">Cada caja escaneada suma 1. Si son muchas iguales, escanea una y escribe las cajas.</div>
@@ -236,7 +236,7 @@ const store = {
 };
 const cfg = { api: store.get("etq_api") || API_URL, clave: store.get("etq_clave") };
 const state = { prov:"", lines:[{qty:"",desc:"",sku:""}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
-let INDEX=[], NAMES=new Set(), BYKEY=new Map(); const CODES=new Map(); let pendingCode=null;
+let INDEX=[], NAMES=new Set(), BYKEY=new Map(), BYSKU=new Map(); const CODES=new Map(); let pendingCode=null;
 
 /* ---------- conexión con el Apps Script ---------- */
 async function api(accion, data={}){
@@ -252,7 +252,7 @@ async function api(accion, data={}){
 function setConn(on){ $("#dot").className="dot "+(on?"on":"off"); $("#conn").textContent=on?`En línea · ${INDEX.length.toLocaleString("en-US")} productos`:"Sin conexión"; }
 
 function cargarInicio(j){
-  INDEX=[]; NAMES=new Set(); BYKEY=new Map(); CODES.clear();
+  INDEX=[]; NAMES=new Set(); BYKEY=new Map(); BYSKU=new Map(); CODES.clear();
   for(const [n,sku,qoh] of (j.productos||[])) addToIndex(n,sku||"",qoh||0);
   for(const [code,v] of Object.entries(j.codigos||{})){ CODES.set(code,{name:v.producto,sku:v.sku||""}); addToIndex(v.producto,v.sku||"",0); }
   state.pallets=j.pallets||[]; state.actualizado=j.actualizado||"";
@@ -290,14 +290,15 @@ $("#aj-file").addEventListener("change",async e=>{
   const f=e.target.files&&e.target.files[0]; if(!f) return; const m=$("#aj-msg"); showMsg(m,"Leyendo el archivo…",true);
   try{
     await cargarXLSX();
-    const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
+    // En CSV se lee todo como texto, para que los SKU no pierdan los ceros de adelante.
+    const wb=XLSX.read(await f.arrayBuffer(),{type:"array",raw:/\.csv$/i.test(f.name)});
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:""});
     // QuickBooks a veces pone títulos arriba: se busca la fila que tiene el nombre del producto.
     let h=-1, ip=-1;
     for(let i=0;i<Math.min(rows.length,15)&&h<0;i++){ const up=rows[i].map(c=>String(c).trim().toUpperCase()); const k=PROD_COLS.find(c=>up.includes(c)); if(k){ h=i; ip=up.indexOf(k); } }
     if(h<0) throw new Error("No encontré la columna del nombre del producto (Product/Service o Name).");
     const up=rows[h].map(c=>String(c).trim().toUpperCase()); const col=list=>{ const k=list.find(c=>up.includes(c)); return k?up.indexOf(k):-1; };
-    const isku=col(SKU_COLS), iq=col(QOH_COLS), it=col(["TYPE","TIPO"]);
+    const isku=col(SKU_COLS), iq=col(QOH_COLS), it=col(["TYPE","ITEM TYPE","TIPO"]);
     const prods=[];
     for(const r of rows.slice(h+1)){
       const n=celdaTexto(r[ip]); if(!n) continue;
@@ -329,12 +330,16 @@ $("#prov").addEventListener("input",e=>{ state.prov=e.target.value.trim(); rende
 /* ---------- productos ---------- */
 const norm = s => String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
 const digits = s => String(s).replace(/\D/g,"");
+// Clave de un código: solo dígitos si es numérico (UPC/EAN/ITF); si trae letras (Code 128, como los
+// X00… de Amazon), letras y números en mayúscula.
+function codeKey(raw){ const s=String(raw||"").trim().toUpperCase(); return /[A-Z]/.test(s) ? s.replace(/[^A-Z0-9]/g,"") : digits(s); }
 // Los 11 dígitos de producto de un UPC, venga como UPC-A, EAN-13 con 0 delante o el GTIN-14 de la caja.
 function key11(d){ if(!d||d.length<8) return null; if(d.length<=12) return d.padStart(12,"0").slice(0,11);
   if(d.length===13) return d[0]==="0"?d.slice(1,12):null; if(d.length===14) return d.slice(2,13); return null; }
 function addToIndex(n,sku,qoh){
   if(!n||NAMES.has(n)) return; NAMES.add(n);
   const p={n,sku,qoh:qoh||0,key:norm(n+" "+sku),nn:norm(n)}; INDEX.push(p);
+  const ks=codeKey(sku); if(/[A-Z]/.test(ks) && ks.length>=4 && !BYSKU.has(ks)) BYSKU.set(ks,p);
   const d=digits(sku); if(d.length>=11&&d.length<=14&&d===String(sku).replace(/[\s-]/g,"")){ const k=key11(d); if(k){ if(!BYKEY.has(k)) BYKEY.set(k,[]); BYKEY.get(k).push(p); } }
 }
 function recentUse(){ const m=new Map(); for(const p of state.pallets.slice(0,300)) for(const it of (p.items||[])) m.set(it.producto,(m.get(it.producto)||0)+1); return m; }
@@ -377,8 +382,9 @@ function updTotal(){ $("#tot").textContent = totalCajas().toLocaleString("en-US"
 $("#addline").onclick=()=>{ state.lines.push({qty:"",desc:"",sku:""}); renderLines(); $("#qty"+(state.lines.length-1)).focus(); };
 
 /* ---------- escaneo de cajas ---------- */
-function lookup(raw){ const d=digits(raw); if(CODES.has(d)) return CODES.get(d);
-  const k=key11(d); const list=k&&BYKEY.get(k); if(list&&list.length){ const best=[...list].sort((a,b)=>b.qoh-a.qoh)[0]; return {name:best.n,sku:best.sku}; } return null; }
+function lookup(raw){ const d=codeKey(raw); if(CODES.has(d)) return CODES.get(d);
+  if(BYSKU.has(d)){ const p=BYSKU.get(d); return {name:p.n,sku:p.sku}; }
+  const k=/^\d+$/.test(d)&&key11(d); const list=k&&BYKEY.get(k); if(list&&list.length){ const best=[...list].sort((a,b)=>b.qoh-a.qoh)[0]; return {name:best.n,sku:best.sku}; } return null; }
 function setScanMsg(el,t,cls){ el.textContent=t; el.className="scanmsg"+(cls?" "+cls:""); }
 function addProduct(name,sku){
   let i=state.lines.findIndex(l=>l.desc===name);
@@ -390,7 +396,7 @@ function addProduct(name,sku){
 function handleScan(raw){
   raw=String(raw||"").trim(); if(!raw) return null; const msg=$("#scanmsg");
   if(/^CD-\d{6}-/i.test(raw)){ cerrarCamara(); openById(raw.toUpperCase()); return null; }
-  const d=digits(raw); if(d.length<6){ setScanMsg(msg,`El código ${raw} no parece de una caja. Intenta otra vez.`,"warn"); return null; }
+  const d=codeKey(raw); if(d.length<(/^\d+$/.test(d)?6:4)){ setScanMsg(msg,`El código ${raw} no parece de una caja. Intenta otra vez.`,"warn"); return null; }
   const hit=lookup(d);
   if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; const t=`+1 ${hit.name} (van ${state.lines[i].qty})`; setScanMsg(msg,t,"ok"); return t; }
   pendingCode=d; const last=state.lines[state.lines.length-1]; if(last.desc||last.qty) state.lines.push({qty:"1",desc:"",sku:""}); else last.qty="1";

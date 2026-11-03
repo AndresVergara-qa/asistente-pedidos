@@ -195,7 +195,9 @@ function crear_(p, copias) {
 }
 
 function guardarCodigo_(codigo, producto, sku) {
-  codigo = String(codigo || '').replace(/\D/g, '');
+  // Solo dígitos si es numérico; si trae letras (Code 128, como los X00… de Amazon), letras y números.
+  codigo = String(codigo || '').trim().toUpperCase();
+  codigo = /[A-Z]/.test(codigo) ? codigo.replace(/[^A-Z0-9]/g, '') : codigo.replace(/\D/g, '');
   producto = String(producto || '').trim();
   if (!codigo || !producto) throw new Error('Falta el código o el producto.');
   return conLlave_(() => {
