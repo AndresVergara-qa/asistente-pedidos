@@ -229,6 +229,8 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
     last_error = ""
     candidates = get_model_candidates(DEFAULT_API_KEY[-8:] if DEFAULT_API_KEY else "none")
     preferred = pick_preferred_model(candidates)
+    today = datetime.now().strftime("%Y-%m-%d")
+    persisted_model, persisted_date = st.session_state.get("persisted_working_model", (None, None))
 
     ordered = ([preferred] if preferred else []) + [c for c in candidates if c != preferred]
     ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
