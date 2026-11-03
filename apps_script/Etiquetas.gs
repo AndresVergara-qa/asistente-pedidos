@@ -40,6 +40,7 @@ function doPost(e) {
       case 'inicio': return inicio_();
       case 'pallets': return { pallets: pallets_() };
       case 'crear': return crear_(req.pallet || {}, req.copias);
+      case 'crearLote': return crearLote_(req);
       case 'codigo': return guardarCodigo_(req.codigo, req.producto, req.sku);
       case 'anular': return anular_(req.id);
       case 'productos': return subirProductos_(req.productos || []);
@@ -149,13 +150,10 @@ function pallets_() {
     });
 }
 
-function crear_(p, copias) {
-  const n = Math.max(1, Math.min(40, parseInt(copias, 10) || 1));
-  const proveedor = String(p.proveedor || '').trim();
-  if (!proveedor) throw new Error('Falta el proveedor.');
-  // El mismo producto en dos renglones se suma en uno solo.
+// El mismo producto en dos renglones se suma en uno solo.
+function limpiarItems_(lista) {
   const items = [];
-  (p.items || []).forEach(it => {
+  (lista || []).forEach(it => {
     const producto = String(it.producto || '').trim();
     const cajas = Number(it.cajas) || 0;
     if (!producto || cajas <= 0) return;
@@ -163,8 +161,15 @@ function crear_(p, copias) {
     if (igual) igual.cajas += cajas;
     else items.push({ producto: producto, sku: String(it.sku || ''), cajas: cajas });
   });
-  if (!items.length) throw new Error('Falta lo que trae el pallet.');
+  return items;
+}
 
+// contenidos: una lista de items por pallet. Todos van en el mismo lote (pallet 1 de N, 2 de N...).
+function guardarLote_(p, contenidos) {
+  const proveedor = String(p.proveedor || '').trim();
+  if (!proveedor) throw new Error('Falta el proveedor.');
+  if (!contenidos.length || contenidos.some(c => !c.length)) throw new Error('Falta lo que trae el pallet.');
+  if (contenidos.length > 40) throw new Error('Son más de 40 pallets: guárdalos en dos partes.');
   return conLlave_(() => {
     const t = ahora_();
     // Consecutivo del día: se lee la pestaña dentro de la llave, así dos teléfonos no sacan el mismo ID.
@@ -173,25 +178,37 @@ function crear_(p, copias) {
       .filter(m => m && m[1] === t.dia)
       .map(m => parseInt(m[2], 10));
     const desde = (usados.length ? Math.max.apply(null, usados) : 0) + 1;
-    const total = items.reduce((a, i) => a + i.cajas, 0);
-    const contenido = items.map(i => i.cajas + ' ' + i.producto).join('; ');
-    const nuevos = [];
-    for (let k = 0; k < n; k++) {
-      nuevos.push({
-        id: 'CD-' + t.dia + '-' + String(desde + k).padStart(2, '0'), fecha: t.fecha, dia: t.dia,
-        proveedor: proveedor, po: String(p.po || '').trim(), ubicacion: String(p.ubicacion || '').trim(),
-        pallet_n: k + 1, pallets_lote: n, contenido: contenido, items_json: JSON.stringify(items),
-        total_cajas: total, anulado: '',
-      });
-    }
+    const n = contenidos.length;
+    const nuevos = contenidos.map((items, k) => ({
+      id: 'CD-' + t.dia + '-' + String(desde + k).padStart(2, '0'), fecha: t.fecha, dia: t.dia,
+      proveedor: proveedor, po: String(p.po || '').trim(), ubicacion: String(p.ubicacion || '').trim(),
+      pallet_n: k + 1, pallets_lote: n, contenido: items.map(i => i.cajas + ' ' + i.producto).join('; '),
+      items_json: JSON.stringify(items), total_cajas: items.reduce((a, i) => a + i.cajas, 0), anulado: '',
+      _items: items,
+    }));
     agregar_(HOJA_PALLETS, COLS_PALLETS, nuevos);
     return {
       pallets: nuevos.map(x => ({
         id: x.id, fecha: x.fecha, dia: x.dia, proveedor: x.proveedor, po: x.po, ubicacion: x.ubicacion,
-        pallet_n: x.pallet_n, pallets_lote: x.pallets_lote, items: items, total_cajas: total, anulado: false,
+        pallet_n: x.pallet_n, pallets_lote: x.pallets_lote, items: x._items, total_cajas: x.total_cajas, anulado: false,
       })),
     };
   });
+}
+
+// Pallets iguales: el mismo contenido repetido en "copias" pallets.
+function crear_(p, copias) {
+  const n = Math.max(1, Math.min(40, parseInt(copias, 10) || 1));
+  const items = limpiarItems_(p.items);
+  const contenidos = [];
+  for (let k = 0; k < n; k++) contenidos.push(items);
+  return guardarLote_(p, items.length ? contenidos : [[]]);
+}
+
+// Pallets distintos que llegaron juntos: cada uno con lo suyo.
+function crearLote_(req) {
+  const contenidos = (req.pallets || []).map(x => limpiarItems_(x && x.items)).filter(c => c.length);
+  return guardarLote_(req, contenidos);
 }
 
 function guardarCodigo_(codigo, producto, sku) {

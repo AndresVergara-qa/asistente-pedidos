@@ -52,8 +52,12 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 .scanbtn{font:600 15px var(--body);padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;white-space:nowrap}
 .scanmsg{font-size:14px;color:var(--muted);min-height:1.2em}
 .scanmsg.ok{color:var(--ok)} .scanmsg.warn{color:var(--warn)}
-.row{display:grid;grid-template-columns:84px 1fr 40px;gap:8px;align-items:start}
+.row{display:grid;grid-template-columns:42px 72px 1fr 40px;gap:8px;align-items:start}
 .row .qty{text-align:center;font-family:var(--display);font-weight:700;font-size:20px}
+.row .pal{text-align:center;font-family:var(--display);font-weight:700;font-size:18px;padding-left:2px;padding-right:2px;color:var(--muted)}
+.palbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:8px;background:var(--accent-soft)}
+.palbar b{font-family:var(--display);font-size:20px}
+.palsub{font-size:14px;color:var(--muted);text-align:right}
 .prodwrap{position:relative;min-width:0}
 .sugg{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-height:260px;overflow:auto}
 .sugg button{display:block;width:100%;text-align:left;font:500 15px var(--body);padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
@@ -159,17 +163,19 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
       </div>
 
       <div class="card">
-        <div class="step">2 · Qué trae el pallet</div>
+        <div class="step">2 · Qué trae cada pallet</div>
+        <div class="palbar"><span>Escaneando el <b id="palact">pallet #1</b></span><button class="ghost" id="palnext">+ Siguiente pallet</button></div>
         <button class="camera" id="cam-cajas">📷 Escanear cajas con la cámara</button>
         <div class="scanbar">
           <input id="scan" placeholder="Pistola o código a mano" autocomplete="off" autocapitalize="characters" enterkeyhint="done" aria-label="Código de la caja">
           <button class="scanbtn" id="scanok">Agregar</button>
         </div>
         <div class="scanmsg" id="scanmsg">Cada caja escaneada suma 1. Si son muchas iguales, escanea una y escribe las cajas.</div>
-        <div class="row muted" style="font-size:13px"><span style="text-align:center">Cajas</span><span>Producto</span><span></span></div>
+        <div class="row muted" style="font-size:13px"><span style="text-align:center">Pallet</span><span style="text-align:center">Cajas</span><span>Producto</span><span></span></div>
         <div id="lines" style="display:flex;flex-direction:column;gap:8px"></div>
         <button class="add" id="addline">+ Otro producto</button>
-        <div class="total"><span>Total cajas del pallet</span><span id="tot">0</span></div>
+        <div class="total"><span id="totlab">Total cajas del pallet</span><span id="tot">0</span></div>
+        <div class="palsub" id="totpal" hidden></div>
       </div>
 
       <div class="card">
@@ -178,7 +184,7 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
           <div><label for="po">PO o factura #</label><input id="po" inputmode="numeric" placeholder="Ej. 1177"></div>
           <div><label for="loc">Ubicación</label><input id="loc" placeholder="Ej. B02"></div>
         </div>
-        <div class="grid2">
+        <div class="grid2" id="copiesrow">
           <div><label for="copies">Pallets iguales</label><input id="copies" type="number" inputmode="numeric" min="1" max="40" value="1"></div>
           <div style="justify-content:flex-end"><span class="muted">Cada pallet recibe su propio ID y su etiqueta.</span></div>
         </div>
@@ -246,7 +252,7 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
 };
 const cfg = { api: store.get("etq_api") || API_URL, clave: store.get("etq_clave") };
-const state = { prov:"", lines:[{qty:"",desc:"",sku:""}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
+const state = { prov:"", pal:1, lines:[{qty:"",desc:"",sku:"",pal:1}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
 let INDEX=[], NAMES=new Set(), BYKEY=new Map(), BYSKU=new Map(), BYNUM=new Map(); const CODES=new Map(); let pendingCode=null;
 
 /* ---------- conexión con el Apps Script ---------- */
@@ -377,6 +383,8 @@ function renderLines(){
   const box=$("#lines"); box.textContent="";
   state.lines.forEach((ln,i)=>{
     const row=document.createElement("div"); row.className="row";
+    const pl=document.createElement("input"); pl.className="pal"; pl.type="number"; pl.inputMode="numeric"; pl.min="1"; pl.value=ln.pal||1; pl.id="pal"+i; pl.setAttribute("aria-label","Número de pallet");
+    pl.oninput=()=>{ ln.pal=Math.max(1,parseInt(pl.value,10)||1); updTotal(); };
     const q=document.createElement("input"); q.className="qty"; q.type="number"; q.inputMode="numeric"; q.min="0"; q.placeholder="0"; q.value=ln.qty; q.id="qty"+i; q.setAttribute("aria-label","Cajas");
     q.oninput=()=>{ ln.qty=q.value; updTotal(); };
     const wrap=document.createElement("div"); wrap.className="prodwrap";
@@ -393,13 +401,35 @@ function renderLines(){
     d.onblur=()=>setTimeout(()=>sg.hidden=true,150);
     wrap.append(d,sg);
     const x=document.createElement("button"); x.className="del"; x.textContent="×"; x.setAttribute("aria-label","Quitar producto");
-    x.onclick=()=>{ state.lines.splice(i,1); if(!state.lines.length) state.lines.push({qty:"",desc:"",sku:""}); renderLines(); updTotal(); };
-    row.append(q,wrap,x); box.appendChild(row);
+    x.onclick=()=>{ state.lines.splice(i,1); if(!state.lines.length) state.lines.push(lineaNueva()); renderLines(); updTotal(); };
+    row.append(pl,q,wrap,x); box.appendChild(row);
   });
 }
-function totalCajas(){ return state.lines.reduce((a,l)=>a+(parseFloat(l.qty)||0),0); }
-function updTotal(){ $("#tot").textContent = totalCajas().toLocaleString("en-US"); }
-$("#addline").onclick=()=>{ state.lines.push({qty:"",desc:"",sku:""}); renderLines(); $("#qty"+(state.lines.length-1)).focus(); };
+function totalCajas(pal){ return state.lines.reduce((a,l)=>a+((pal==null||(l.pal||1)===pal)?(parseFloat(l.qty)||0):0),0); }
+// Cada renglón lleva su número de pallet. Lo que se escanea va al pallet actual; "Siguiente pallet" empieza
+// otro. Al generar sale una etiqueta por pallet, cada una con lo suyo (pallet 1 de N, 2 de N...).
+function lineaNueva(extra){ return Object.assign({qty:"",desc:"",sku:"",pal:state.pal},extra||{}); }
+function palletsUsados(){ return [...new Set(state.lines.filter(l=>l.desc.trim()||(parseFloat(l.qty)||0)>0).map(l=>l.pal||1))].sort((a,b)=>a-b); }
+function updTotal(){
+  const usados=palletsUsados(), varios=usados.length>1;
+  $("#tot").textContent = totalCajas().toLocaleString("en-US");
+  $("#totlab").textContent = varios?`Total cajas (${usados.length} pallets)`:"Total cajas del pallet";
+  $("#totpal").hidden=!varios; $("#totpal").textContent=usados.map(n=>`#${n}: ${fmtNum(totalCajas(n))}`).join(" · ");
+  // "Pallets iguales" es para un solo contenido repetido; con varios pallets distintos no aplica.
+  $("#copiesrow").hidden=varios; if(varios) $("#copies").value="1";
+  $("#palact").textContent=`pallet #${state.pal}`;
+  $("#gen").textContent= varios?`Generar ${usados.length} etiquetas`:"Generar etiqueta";
+}
+$("#addline").onclick=()=>{ state.lines.push(lineaNueva()); renderLines(); $("#qty"+(state.lines.length-1)).focus(); };
+$("#palnext").onclick=()=>{
+  const max=Math.max(state.pal,...state.lines.map(l=>l.pal||1));
+  const actualVacio=!state.lines.some(l=>(l.pal||1)===state.pal&&(l.desc.trim()||(parseFloat(l.qty)||0)>0));
+  if(!actualVacio) state.pal=max+1;
+  const last=state.lines[state.lines.length-1];
+  if(last&&!last.desc&&!last.qty) last.pal=state.pal; else state.lines.push(lineaNueva());
+  renderLines(); updTotal();
+  setScanMsg($("#scanmsg"),actualVacio?`El pallet #${state.pal} todavía está vacío: escanea sus cajas.`:`Ahora vas con el pallet #${state.pal}. Escanea sus cajas.`,"ok");
+};
 
 /* ---------- escaneo de cajas ---------- */
 function lookup(raw){ const d=codeKey(raw); if(CODES.has(d)) return CODES.get(d);
@@ -414,9 +444,9 @@ function lookup(raw){ const d=codeKey(raw); if(CODES.has(d)) return CODES.get(d)
   return null; }
 function setScanMsg(el,t,cls){ el.textContent=t; el.className="scanmsg"+(cls?" "+cls:""); }
 function addProduct(name,sku){
-  let i=state.lines.findIndex(l=>l.desc===name);
+  let i=state.lines.findIndex(l=>l.desc===name&&(l.pal||1)===state.pal);
   if(i>=0){ state.lines[i].qty=String((parseFloat(state.lines[i].qty)||0)+1); }
-  else { const last=state.lines[state.lines.length-1]; if(last&&!last.desc&&!last.qty){ last.desc=name; last.sku=sku; last.qty="1"; i=state.lines.length-1; } else { state.lines.push({qty:"1",desc:name,sku}); i=state.lines.length-1; } }
+  else { const last=state.lines[state.lines.length-1]; if(last&&!last.desc&&!last.qty){ last.desc=name; last.sku=sku; last.qty="1"; last.pal=state.pal; i=state.lines.length-1; } else { state.lines.push(lineaNueva({qty:"1",desc:name,sku})); i=state.lines.length-1; } }
   renderLines(); updTotal(); return i;
 }
 // Devuelve el texto para mostrar, y si el código no se conoce deja el renglón listo para elegir el producto.
@@ -425,8 +455,8 @@ function handleScan(raw){
   if(/^CD-\d{6}-/i.test(raw)){ cerrarCamara(); openById(raw.toUpperCase()); return null; }
   const d=codeKey(raw); if(d.length<(/^\d+$/.test(d)?6:4)){ setScanMsg(msg,`El código ${raw} no parece de una caja. Intenta otra vez.`,"warn"); return null; }
   const hit=lookup(d);
-  if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; ultimoAgregado=hit.name; const t=`+1 ${hit.name} (van ${state.lines[i].qty})`; setScanMsg(msg,t,"ok"); return t; }
-  pendingCode=d; const last=state.lines[state.lines.length-1]; if(last.desc||last.qty) state.lines.push({qty:"1",desc:"",sku:""}); else last.qty="1";
+  if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; ultimoAgregado=hit.name; const t=`+1 ${hit.name} (van ${state.lines[i].qty} en el pallet #${state.pal})`; setScanMsg(msg,t,"ok"); return t; }
+  pendingCode=d; const last=state.lines[state.lines.length-1]; if(last.desc||last.qty) state.lines.push(lineaNueva({qty:"1"})); else { last.qty="1"; last.pal=state.pal; }
   renderLines(); updTotal(); cerrarCamara(); const i=state.lines.length-1; $("#desc"+i).focus();
   setScanMsg(msg,`El código ${d} todavía no está guardado. Busca el producto abajo y tócalo: la próxima vez saldrá solo.`,"warn");
   return null;
@@ -471,15 +501,15 @@ function leidoCamara(code){
   setTimeout(()=>{ $("#cam").classList.remove("ok"); },ESPERA_MS);
 }
 let ultimaSuma=null, ultimoAgregado=null, audio=null;
-function camTotal(){ $("#cam-tot").textContent=`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`; }
+function camTotal(){ $("#cam-tot").textContent=`Pallet #${state.pal}: ${fmtNum(totalCajas(state.pal))} cajas`+(palletsUsados().length>1?` · en total ${fmtNum(totalCajas())}`:""); }
 function pitido(){
   try{ if(!audio) return; const o=audio.createOscillator(), g=audio.createGain(); o.frequency.value=1250; g.gain.value=0.15;
     o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime+0.09); }catch(e){}
 }
 $("#cam-deshacer").onclick=()=>{
-  const i=state.lines.findIndex(l=>l.desc===ultimaSuma); if(i<0){ $("#cam-ultimo").hidden=true; return; }
+  const i=state.lines.findIndex(l=>l.desc===ultimaSuma&&(l.pal||1)===state.pal); if(i<0){ $("#cam-ultimo").hidden=true; return; }
   const q=(parseFloat(state.lines[i].qty)||0)-1;
-  if(q>0) state.lines[i].qty=String(q); else { state.lines.splice(i,1); if(!state.lines.length) state.lines.push({qty:"",desc:"",sku:""}); }
+  if(q>0) state.lines[i].qty=String(q); else { state.lines.splice(i,1); if(!state.lines.length) state.lines.push(lineaNueva()); }
   renderLines(); updTotal(); camTotal();
   $("#cam-ultimo-txt").textContent=`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`;
   setScanMsg($("#scanmsg"),`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`,"ok");
@@ -574,7 +604,7 @@ async function abrirCamara(modo){
   camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok");
   try{ if(!audio) audio=new (window.AudioContext||window.webkitAudioContext)(); if(audio.state==="suspended") audio.resume(); }catch(e){ audio=null; }
   $("#cam-ultimo").hidden=true; $("#cam-deshacer").hidden=false; ultimaSuma=null; $("#cam-nota").hidden=modo!=="cajas";
-  $("#cam-estado").textContent="Abriendo cámara…"; $("#cam-tot").textContent= modo==="cajas"?`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`:"Apunta al código de barras de la etiqueta";
+  $("#cam-estado").textContent="Abriendo cámara…"; if(modo==="cajas") camTotal(); else $("#cam-tot").textContent="Apunta al código de barras de la etiqueta";
   try{ await iniciarStream(store.get("etq_cam")||null); }
   catch(e){ $("#cam-estado").textContent="No pude abrir la cámara. Dale permiso de cámara a esta página en el navegador."; return; }
   camActiva=true; ultimoCodigo=null; pausaHasta=0; candCodigo=null; candVeces=0;
@@ -624,18 +654,29 @@ $("#camfile").addEventListener("change",async e=>{
 function showMsg(el,text,ok){ el.hidden=false; el.textContent=text; el.className="msg"+(ok?" ok":""); }
 $("#gen").onclick=async()=>{
   const m=$("#genmsg");
-  const items=state.lines.filter(l=>(parseFloat(l.qty)||0)>0 && l.desc.trim()).map(l=>({producto:l.desc.trim(), sku:l.sku||"", cajas:parseFloat(l.qty)}));
+  const buenas=state.lines.filter(l=>(parseFloat(l.qty)||0)>0 && l.desc.trim());
+  const item=l=>({producto:l.desc.trim(), sku:l.sku||"", cajas:parseFloat(l.qty)});
   if(!state.prov){ showMsg(m,"Falta el proveedor. Toca uno de la lista o escríbelo."); return; }
-  if(!items.length){ showMsg(m,"Falta lo que trae el pallet. Escanea las cajas o escribe el producto y las cajas."); return; }
+  if(!buenas.length){ showMsg(m,"Falta lo que trae el pallet. Escanea las cajas o escribe el producto y las cajas."); return; }
+  // Un grupo por número de pallet, en orden: #1, #2, #5 salen como pallet 1, 2 y 3 de 3.
+  const nums=[...new Set(buenas.map(l=>l.pal||1))].sort((a,b)=>a-b);
+  const grupos=nums.map(n=>buenas.filter(l=>(l.pal||1)===n).map(item));
   const copias=Math.min(40,Math.max(1,parseInt($("#copies").value,10)||1));
+  if(grupos.length>40){ showMsg(m,"Son más de 40 pallets: genera las etiquetas en dos partes."); return; }
   $("#gen").disabled=true; showMsg(m,"Guardando…",true);
   try{
-    const j=await api("crear",{pallet:{proveedor:state.prov, po:$("#po").value.trim(), ubicacion:$("#loc").value.trim(), items}, copias});
+    const base={proveedor:state.prov, po:$("#po").value.trim(), ubicacion:$("#loc").value.trim()};
+    let j;
+    if(grupos.length===1) j=await api("crear",{pallet:Object.assign({items:grupos[0]},base), copias});
+    else {
+      try{ j=await api("crearLote",Object.assign({pallets:grupos.map(items=>({items}))},base)); }
+      catch(e){ if(/Acci[oó]n desconocida/.test(e.message)) throw new Error("para guardar varios pallets distintos hay que actualizar el Apps Script (Implementar > Gestionar implementaciones > editar > Nueva versión)."); throw e; }
+    }
     state.pallets=[...j.pallets.slice().reverse(),...state.pallets];
     const ids=j.pallets.map(p=>p.id);
     showMsg(m, ids.length>1?`Listo: ${ids[0]} a ${ids[ids.length-1]} guardados en el registro.`:`Listo: ${ids[0]} quedó guardado en el registro.`, true);
     openLabels(j.pallets);
-    state.lines=[{qty:"",desc:"",sku:""}]; renderLines(); updTotal(); $("#po").value=""; $("#loc").value=""; $("#copies").value="1"; setScanMsg($("#scanmsg"),"");
+    state.pal=1; state.lines=[lineaNueva()]; renderLines(); updTotal(); $("#po").value=""; $("#loc").value=""; $("#copies").value="1"; setScanMsg($("#scanmsg"),"");
     renderChips();
   }catch(e){ showMsg(m,"No se guardó: "+e.message); }
   finally{ $("#gen").disabled=false; }
