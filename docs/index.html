@@ -475,12 +475,13 @@ $("#cam-deshacer").onclick=()=>{
   setScanMsg($("#scanmsg"),`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`,"ok");
   if(q<=0){ ultimaSuma=null; $("#cam-deshacer").hidden=true; }
 };
+// Cuántas veces por segundo mira cada lector; sale arriba en la cámara para saber si los dos funcionan.
+const diag={tel:0,zx:0,zxModo:"",ini:0};
 async function loopNativo(det){ const v=$("#video");
-  while(camActiva){ try{ if(v.readyState>=2&&v.videoWidth){
-      const src=typeof createImageBitmap==="function"?await createImageBitmap(v):v;
-      let c; try{ c=await det.detect(src); } finally { if(src.close) src.close(); }
+  // El lector del teléfono lee directo del video (así fue como leyó la regla).
+  while(camActiva){ try{ if(v.readyState>=2&&v.videoWidth){ const c=await det.detect(v); diag.tel++;
       const ok=c.find(x=>x.format!=="itf"||/^\d{14}$/.test(x.rawValue)); if(ok) leidoCamara(ok.rawValue); } }catch(e){}
-    await new Promise(r=>setTimeout(r,150)); } }
+    await new Promise(r=>setTimeout(r,180)); } }
 // Lector de códigos: zxing-cpp compilado a WebAssembly (lee mucho mejor que la versión JavaScript,
 // sobre todo códigos pequeños o borrosos). El .wasm va en vendor/, junto a la página.
 // Solo los tipos de código que traen las cajas: con todos los tipos lineales, las rayas de una mesa o
@@ -511,33 +512,39 @@ function alLector(msg,transfer){
 const cvVivo=document.createElement("canvas"), ctxVivo=cvVivo.getContext("2d",{willReadFrequently:true});
 async function leerCuadro(v,banda){
   const vw=v.videoWidth, vh=v.videoHeight;
-  if(conBitmap&&lector!==false){
-    const bmp=await createImageBitmap(v); const r=await alLector({bmp,banda},[bmp]);
-    if(r&&!r.sinCanvas) return r.text;
-    if(r&&r.sinCanvas) conBitmap=false; else return null;
+  let bmp=null;
+  if(conBitmap&&lector!==false){ try{ bmp=await createImageBitmap(v); }catch(e){ conBitmap=false; } }
+  if(bmp){
+    const r=await alLector({bmp,banda},[bmp]);
+    // sinCanvas: el teléfono no tiene OffscreenCanvas; vacio: el cuadro llegó transparente (pasa en
+    // algunos Android). En los dos casos se sigue recortando aquí.
+    if(r&&!r.sinCanvas&&!r.vacio){ diag.zx++; diag.zxModo="2º plano"; return r.text; }
+    if(r&&(r.sinCanvas||r.vacio)) conBitmap=false; else return null;
   }
+  diag.zxModo="directo";
   // Sin Worker o sin OffscreenCanvas: se recorta aquí (más lento).
   if(banda){ const bh=Math.round(vh*0.4); cvVivo.width=vw; cvVivo.height=bh; ctxVivo.drawImage(v,0,(vh-bh)/2,vw,bh,0,0,vw,bh); }
   else { const k=Math.min(1,1280/vw); cvVivo.width=Math.round(vw*k); cvVivo.height=Math.round(vh*k); ctxVivo.drawImage(v,0,0,cvVivo.width,cvVivo.height); }
   const img=ctxVivo.getImageData(0,0,cvVivo.width,cvVivo.height);
-  const r=await alLector({img},[img.data.buffer]); if(r) return r.text;
+  const r=await alLector({img},[img.data.buffer]); diag.zx++; if(r) return r.text;
   await prepararLector(); return leerImagen(img);
 }
 async function loopWasm(conNativo){
   const v=$("#video");
-  // Con el lector propio del teléfono (Android) este va más despacio, solo de apoyo.
-  const cada=conNativo?300:150;
+  // Con el lector propio del teléfono (Android) este va despacio y solo mira la franja de la línea:
+  // es de apoyo, y cada cuadro que se saca del video a 4K cuesta.
+  const cada=conNativo?500:150;
   let vuelta=0;
   while(camActiva){
-    // Se alterna: la franja del centro (donde está la línea) a resolución completa, para códigos
-    // pequeños o de barras finas, y el cuadro entero reducido, para códigos grandes o torcidos.
-    if(v.readyState>=2&&v.videoWidth){ try{ const t=await leerCuadro(v,vuelta++%2===0); if(t) leidoCamara(t); }catch(e){} }
+    // Sin lector del teléfono (iPhone) se alterna: la franja del centro (donde está la línea) a resolución
+    // completa, para códigos pequeños o de barras finas, y el cuadro entero reducido, para los grandes o torcidos.
+    if(v.readyState>=2&&v.videoWidth){ try{ const t=await leerCuadro(v,conNativo||vuelta++%2===0); if(t) leidoCamara(t); }catch(e){} }
     await new Promise(r=>setTimeout(r,cada));
   }
 }
-// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo sale a 1080p. El zoom (2× al abrir)
-// deja leer barras finas sin pegar el teléfono a la caja (de muy cerca pierde el foco). Con 4K el video
-// iba lento en el teléfono, así que se pide 1080p. La cámara elegida con "Cambiar cámara" se recuerda.
+// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo, a menos. Se pide hasta 4K (con 1080p
+// no leía la regla) y zoom 2× al abrir, que deja leer barras finas sin pegar el teléfono a la caja (de muy
+// cerca pierde el foco). La cámara elegida con "Cambiar cámara" se recuerda.
 let camZoom=null, camLuz=false, camLista=[];
 function camTrack(){ return camStream?camStream.getVideoTracks()[0]:null; }
 async function ponerZoom(z){
@@ -549,8 +556,11 @@ async function ponerZoom(z){
 function infoCamara(){
   const tr=camTrack(), v=$("#video"); if(!tr) return;
   const nom=(tr.label||"cámara").replace(/\s*\([^)]*\)\s*$/,"");
-  $("#cam-info").textContent=`${nom} · ${v.videoWidth||"?"}×${v.videoHeight||"?"}`+(camZoom?` · zoom ${Math.round((camZoom.actual||1)*10)/10}×`:"");
+  const seg=Math.max(1,(Date.now()-diag.ini)/1000), lect=diag.ini?` · lee: ${camDet?`tel ${Math.round(diag.tel/seg)}/s + `:""}zx ${Math.round(diag.zx/seg)}/s${diag.zxModo?" "+diag.zxModo:""}`:"";
+  $("#cam-info").textContent=`${nom} · ${v.videoWidth||"?"}×${v.videoHeight||"?"}`+(camZoom?` · zoom ${Math.round((camZoom.actual||1)*10)/10}×`:"")+lect;
 }
+let camDet=null;
+setInterval(()=>{ if(camActiva) infoCamara(); if(camActiva&&Date.now()-diag.ini>6000){ diag.ini=Date.now()-3000; diag.tel=Math.round(diag.tel/2); diag.zx=Math.round(diag.zx/2); } },1000);
 async function listarCamaras(){
   try{
     const todas=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");
@@ -561,7 +571,7 @@ async function listarCamaras(){
 }
 async function iniciarStream(deviceId){
   if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
-  const res={width:{ideal:1920},height:{ideal:1080}};
+  const res={width:{ideal:3840},height:{ideal:2160}};
   const video=deviceId?Object.assign({deviceId:{exact:deviceId}},res):Object.assign({facingMode:{ideal:"environment"}},res);
   try{ camStream=await navigator.mediaDevices.getUserMedia({video,audio:false}); }
   catch(e){ if(!deviceId) throw e; store.set("etq_cam",""); return iniciarStream(null); }
@@ -586,6 +596,7 @@ async function abrirCamara(modo){
   $("#cam-estado").textContent= modo==="cajas"?"Apunta al código de barras de la caja":"Apunta al código de la etiqueta del pallet";
   let det=null;
   if("BarcodeDetector" in window){ try{ const sop=await BarcodeDetector.getSupportedFormats(); const f=["ean_13","ean_8","upc_a","upc_e","itf","code_128","code_39"].filter(x=>sop.includes(x)); if(f.length) det=new BarcodeDetector({formats:f}); }catch(e){} }
+  camDet=det; diag.tel=0; diag.zx=0; diag.zxModo=""; diag.ini=Date.now();
   if(det) loopNativo(det);
   loopWasm(!!det);
 }

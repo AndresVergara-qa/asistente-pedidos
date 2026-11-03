@@ -24,6 +24,13 @@ function recortar(bmp, banda) {
   return ctx.getImageData(0, 0, cv.width, cv.height);
 }
 
+// En algunos Android el cuadro del video llega transparente al segundo plano: se avisa para leer de otra forma.
+function vacio(img) {
+  const d = img.data, paso = Math.max(4, Math.floor(d.length / 4 / 200) * 4);
+  for (let i = 3; i < d.length; i += paso) if (d[i] !== 0) return false;
+  return true;
+}
+
 onmessage = async (e) => {
   const { id, img, bmp, banda, opciones } = e.data;
   if (opciones) { leer = opciones; return; }
@@ -32,6 +39,7 @@ onmessage = async (e) => {
     if (bmp) {
       data = recortar(bmp, banda); bmp.close();
       if (!data) { postMessage({ id, text: null, sinCanvas: true }); return; }
+      if (vacio(data)) { postMessage({ id, text: null, vacio: true }); return; }
     }
     await listo;
     const r = await ZXingWASM.readBarcodes(data, leer);
