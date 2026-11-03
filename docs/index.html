@@ -93,6 +93,8 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 #cam .estado{font:600 17px var(--body);min-height:1.4em}
 #cam.ok .estado{color:#5fe08a}
 #cam .camtot{font:700 18px var(--display);letter-spacing:.03em;color:#cfd2cb}
+#cam .cambtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#cam button.alt{background:transparent;color:#fff;border:1px solid #777}
 #cam button{font:700 19px var(--display);text-transform:uppercase;letter-spacing:.04em;padding:14px;border:0;border-radius:10px;background:#fff;color:#111;cursor:pointer}
 #print{display:none}
 @media print{
@@ -214,14 +216,15 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
   <div class="bar">
     <div class="estado" id="cam-estado">Abriendo cámara…</div>
     <div class="camtot" id="cam-tot"></div>
-    <button id="cam-close">Listo</button>
+    <div class="cambtns"><button id="cam-foto" class="alt">No lee: tomar foto</button><button id="cam-close">Listo</button></div>
   </div>
 </div>
 <div id="print"></div>
+<input type="file" id="camfile" accept="image/*" capture="environment" hidden>
 
 <script src="vendor/jsbarcode.min.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
-<script src="vendor/zxing.min.js"></script>
+<script src="vendor/zxing-wasm-reader.js"></script>
 <script>
 // Link del Apps Script (Implementar > Aplicación web). Si se cambia la implementación, se actualiza aquí o en Ajustes.
 const API_URL = "https://script.google.com/macros/s/AKfycby_od_FO9J6ANdrYphcL94N57sQoV8Yql34Iv9EHvlaPXosR4R-KZ97oYPyf_0ObzHM/exec";
@@ -434,29 +437,49 @@ function leidoCamara(code){
 }
 async function loopNativo(det){ const v=$("#video");
   while(camActiva){ try{ if(v.readyState>=2){ const c=await det.detect(v); if(c.length) leidoCamara(c[0].rawValue); } }catch(e){} await new Promise(r=>setTimeout(r,120)); } }
-async function loopZXing(){
-  const Z=window.ZXing, v=$("#video"); const hints=new Map();
-  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.UPC_E,Z.BarcodeFormat.ITF,Z.BarcodeFormat.CODE_128,Z.BarcodeFormat.CODE_39]);
-  hints.set(Z.DecodeHintType.TRY_HARDER,true);
-  const reader=new Z.MultiFormatReader(); reader.setHints(hints);
-  const cv=document.createElement("canvas"), ctx=cv.getContext("2d",{willReadFrequently:true});
+// Lector de códigos: zxing-cpp compilado a WebAssembly (lee mucho mejor que la versión JavaScript,
+// sobre todo códigos pequeños o borrosos). El .wasm va en vendor/, junto a la página.
+const LEER={tryHarder:true,formats:["AllLinear"],maxNumberOfSymbols:1};
+let wasmListo=null;
+function prepararLector(){
+  if(!wasmListo) wasmListo=ZXingWASM.prepareZXingModule({
+    overrides:{locateFile:(path,prefix)=>path.endsWith(".wasm")?new URL("vendor/"+path,location.href).href:prefix+path},
+    fireImmediately:true});
+  return wasmListo;
+}
+async function leerImagen(imgData){ const r=await ZXingWASM.readBarcodes(imgData,LEER); const ok=r.find(x=>x.text); return ok?ok.text:null; }
+async function loopWasm(){
+  const v=$("#video"); const cv=document.createElement("canvas"), ctx=cv.getContext("2d",{willReadFrequently:true});
+  try{ await prepararLector(); }catch(e){ return; }
+  let vuelta=0;
   while(camActiva){
-    if(v.readyState>=2&&v.videoWidth){ const k=Math.min(1,960/v.videoWidth); cv.width=Math.round(v.videoWidth*k); cv.height=Math.round(v.videoHeight*k); ctx.drawImage(v,0,0,cv.width,cv.height);
-      try{ leidoCamara(reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(cv)))).getText()); }catch(e){} }
-    await new Promise(r=>setTimeout(r,150));
+    if(v.readyState>=2&&v.videoWidth){
+      const vw=v.videoWidth, vh=v.videoHeight;
+      // Se alterna: la franja del centro (donde está la línea) a resolución completa, para códigos
+      // pequeños o de barras finas, y el cuadro entero reducido, para códigos grandes o torcidos.
+      if(vuelta++%2===0){ const bh=Math.round(vh*0.4); cv.width=vw; cv.height=bh; ctx.drawImage(v,0,(vh-bh)/2,vw,bh,0,0,vw,bh); }
+      else { const k=Math.min(1,1280/vw); cv.width=Math.round(vw*k); cv.height=Math.round(vh*k); ctx.drawImage(v,0,0,cv.width,cv.height); }
+      try{ const t=await leerImagen(ctx.getImageData(0,0,cv.width,cv.height)); if(t) leidoCamara(t); }catch(e){}
+    }
+    await new Promise(r=>setTimeout(r,100));
   }
 }
 async function abrirCamara(modo){
-  camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok");
+  camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok"); prepararLector().catch(()=>{});
   $("#cam-estado").textContent="Abriendo cámara…"; $("#cam-tot").textContent= modo==="cajas"?`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`:"Apunta al código de barras de la etiqueta";
-  try{ camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false}); }
+  try{ camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}},audio:false}); }
   catch(e){ $("#cam-estado").textContent="No pude abrir la cámara. Dale permiso de cámara a esta página en el navegador."; return; }
   camActiva=true; ultimoCodigo=null; pausaHasta=0;
+  // Enfoque continuo donde el teléfono lo permite (Android); en iPhone ya viene así.
+  try{ const tr=camStream.getVideoTracks()[0]; const cap=tr.getCapabilities?tr.getCapabilities():{}; if(cap.focusMode&&cap.focusMode.includes("continuous")) await tr.applyConstraints({advanced:[{focusMode:"continuous"}]});
+    // Un poco de zoom deja leer etiquetas pequeñas sin acercar tanto el teléfono (que pierde el foco).
+    if(cap.zoom&&cap.zoom.max>=1.5) await tr.applyConstraints({advanced:[{zoom:Math.max(cap.zoom.min||1,1.5)}]}); }catch(e){}
   const v=$("#video"); v.srcObject=camStream; try{ await v.play(); }catch(e){}
   $("#cam-estado").textContent= modo==="cajas"?"Apunta al código de barras de la caja":"Apunta al código de la etiqueta del pallet";
   let det=null;
   if("BarcodeDetector" in window){ try{ const sop=await BarcodeDetector.getSupportedFormats(); const f=["ean_13","ean_8","upc_a","upc_e","itf","code_128","code_39"].filter(x=>sop.includes(x)); if(f.length) det=new BarcodeDetector({formats:f}); }catch(e){} }
-  if(det) loopNativo(det); else loopZXing();
+  if(det) loopNativo(det);
+  loopWasm();
 }
 function cerrarCamara(){
   camActiva=false; if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
@@ -465,6 +488,34 @@ function cerrarCamara(){
 $("#cam-cajas").onclick=()=>abrirCamara("cajas");
 $("#cam-log").onclick=()=>abrirCamara("log");
 $("#cam-close").onclick=cerrarCamara;
+
+/* ---------- foto (para códigos pequeños o cuando la cámara en vivo no lee) ---------- */
+// La cámara del teléfono enfoca mejor de cerca que el video en vivo; la foto se lee a resolución completa.
+async function decodeImage(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=url; });
+    if("BarcodeDetector" in window){ try{ const r=await new BarcodeDetector().detect(img); if(r&&r.length) return r[0].rawValue; }catch(e){} }
+    await prepararLector();
+    const iw=img.naturalWidth, ih=img.naturalHeight;
+    for(const maxSide of [2600,1400]){
+      const sc=Math.min(1,maxSide/Math.max(iw,ih)); const cv=document.createElement("canvas");
+      cv.width=Math.round(iw*sc); cv.height=Math.round(ih*sc);
+      const c=cv.getContext("2d",{willReadFrequently:true}); c.drawImage(img,0,0,cv.width,cv.height);
+      const t=await leerImagen(c.getImageData(0,0,cv.width,cv.height)); if(t) return t;
+    }
+    return null;
+  } finally { URL.revokeObjectURL(url); }
+}
+let fotoModo="cajas";
+$("#cam-foto").onclick=()=>{ fotoModo=camModo; cerrarCamara(); $("#camfile").value=""; $("#camfile").click(); };
+$("#camfile").addEventListener("change",async e=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  const msg= fotoModo==="cajas"?$("#scanmsg"):$("#qmsg"); setScanMsg(msg,"Leyendo el código de la foto…");
+  let code=null; try{ code=await decodeImage(f); }catch(err){}
+  if(!code){ setScanMsg(msg,"No pude leer el código en la foto. Tómala de cerca, con buena luz, sin reflejo y con el código derecho.","warn"); return; }
+  if(fotoModo==="cajas") handleScan(code); else { $("#q").value=code; findPallet(code); }
+});
 
 /* ---------- generar ---------- */
 function showMsg(el,text,ok){ el.hidden=false; el.textContent=text; el.className="msg"+(ok?" ok":""); }
