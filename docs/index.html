@@ -431,8 +431,14 @@ $("#scanok").onclick=()=>{ const v=$("#scan").value.trim();
 // El mismo código solo vuelve a contar cuando salió de la cámara, para no sumar la misma caja varias veces.
 const ESPERA_MS=1200, HUECO_MS=900;
 let camStream=null, camActiva=false, camModo="cajas", pausaHasta=0, ultimoCodigo=null, ultimaVista=0;
+// Un código cuenta solo si se lee igual dos veces seguidas (tres si es corto, de 8 dígitos o menos):
+// así una lectura equivocada suelta no se cuela como si fuera una caja.
+let candCodigo=null, candVeces=0, candHora=0;
 function leidoCamara(code){
-  const ahora=Date.now();
+  const ahora=Date.now(); code=String(code||"").trim(); if(!code) return;
+  if(code===candCodigo && ahora-candHora<1500) candVeces++; else { candCodigo=code; candVeces=1; }
+  candHora=ahora;
+  if(candVeces<(/^\d{1,8}$/.test(code)?3:2)) return;
   if(!camActiva || (ahora<pausaHasta && code!==ultimoCodigo)) return;
   const misma=code===ultimoCodigo && ahora-ultimaVista<HUECO_MS; ultimoCodigo=code; ultimaVista=ahora;
   if(misma || ahora<pausaHasta) return;
@@ -445,10 +451,12 @@ function leidoCamara(code){
   setTimeout(()=>{ $("#cam").classList.remove("ok"); if(camActiva) $("#cam-estado").textContent="Apunta al código de la siguiente caja"; },ESPERA_MS);
 }
 async function loopNativo(det){ const v=$("#video");
-  while(camActiva){ try{ if(v.readyState>=2){ const c=await det.detect(v); if(c.length) leidoCamara(c[0].rawValue); } }catch(e){} await new Promise(r=>setTimeout(r,120)); } }
+  while(camActiva){ try{ if(v.readyState>=2){ const c=await det.detect(v); const ok=c.find(x=>x.format!=="itf"||/^\d{14}$/.test(x.rawValue)); if(ok) leidoCamara(ok.rawValue); } }catch(e){} await new Promise(r=>setTimeout(r,120)); } }
 // Lector de códigos: zxing-cpp compilado a WebAssembly (lee mucho mejor que la versión JavaScript,
 // sobre todo códigos pequeños o borrosos). El .wasm va en vendor/, junto a la página.
-const LEER={tryHarder:true,formats:["AllLinear"],maxNumberOfSymbols:1};
+// Solo los tipos de código que traen las cajas: con todos los tipos lineales, las rayas de una mesa o
+// de un plástico a veces salían como un código que no existe.
+const LEER={tryHarder:true,formats:["EAN13","EAN8","UPCA","UPCE","ITF14","Code128","Code39"],maxNumberOfSymbols:1};
 let wasmListo=null;
 function prepararLector(){
   if(!wasmListo) wasmListo=ZXingWASM.prepareZXingModule({
@@ -518,7 +526,7 @@ async function abrirCamara(modo){
   $("#cam-estado").textContent="Abriendo cámara…"; $("#cam-tot").textContent= modo==="cajas"?`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`:"Apunta al código de barras de la etiqueta";
   try{ await iniciarStream(store.get("etq_cam")||null); }
   catch(e){ $("#cam-estado").textContent="No pude abrir la cámara. Dale permiso de cámara a esta página en el navegador."; return; }
-  camActiva=true; ultimoCodigo=null; pausaHasta=0;
+  camActiva=true; ultimoCodigo=null; pausaHasta=0; candCodigo=null; candVeces=0;
   $("#cam-estado").textContent= modo==="cajas"?"Apunta al código de barras de la caja":"Apunta al código de la etiqueta del pallet";
   let det=null;
   if("BarcodeDetector" in window){ try{ const sop=await BarcodeDetector.getSupportedFormats(); const f=["ean_13","ean_8","upc_a","upc_e","itf","code_128","code_39"].filter(x=>sop.includes(x)); if(f.length) det=new BarcodeDetector({formats:f}); }catch(e){} }
