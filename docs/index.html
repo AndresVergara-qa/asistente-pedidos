@@ -95,6 +95,12 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 #cam .camtot{font:700 18px var(--display);letter-spacing:.03em;color:#cfd2cb}
 #cam .cambtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #cam button.alt{background:transparent;color:#fff;border:1px solid #777}
+#cam .camtop{position:absolute;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+#cam .camtop .info{font:500 12px var(--body);color:#fff;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;max-width:100%}
+#cam .camtop .info:empty{display:none}
+#cam .camtop .ctl{display:flex;flex-wrap:wrap;gap:8px}
+#cam .camtop button{font:600 15px var(--body);text-transform:none;letter-spacing:0;padding:9px 14px;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:999px}
+#cam .camtop button[hidden]{display:none}
 #cam button{font:700 19px var(--display);text-transform:uppercase;letter-spacing:.04em;padding:14px;border:0;border-radius:10px;background:#fff;color:#111;cursor:pointer}
 #print{display:none}
 @media print{
@@ -212,7 +218,10 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 </div>
 
 <div id="cam" hidden>
-  <div class="vid"><video id="video" muted playsinline autoplay></video><div class="guia"></div></div>
+  <div class="vid"><video id="video" muted playsinline autoplay></video><div class="guia"></div>
+    <div class="camtop"><div class="info" id="cam-info"></div>
+      <div class="ctl"><button id="cam-zoom" hidden>Zoom</button><button id="cam-luz" hidden>Luz</button><button id="cam-cambiar" hidden>Cambiar cámara</button></div></div>
+  </div>
   <div class="bar">
     <div class="estado" id="cam-estado">Abriendo cámara…</div>
     <div class="camtot" id="cam-tot"></div>
@@ -464,17 +473,52 @@ async function loopWasm(){
     await new Promise(r=>setTimeout(r,100));
   }
 }
+// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo sale a 1080p o menos. Por eso se pide
+// la mayor resolución que dé el teléfono (hasta 4K) y zoom, que deja leer barras finas sin pegar el
+// teléfono a la caja (de muy cerca pierde el foco). La cámara elegida con "Cambiar cámara" se recuerda.
+let camZoom=null, camLuz=false, camLista=[];
+function camTrack(){ return camStream?camStream.getVideoTracks()[0]:null; }
+async function ponerZoom(z){
+  const tr=camTrack(); if(!tr||!camZoom) return;
+  z=Math.max(camZoom.min,Math.min(camZoom.max,z));
+  try{ await tr.applyConstraints({advanced:[{zoom:z}]}); camZoom.actual=z; }catch(e){}
+  $("#cam-zoom").textContent=`Zoom ${Math.round((camZoom.actual||1)*10)/10}×`; infoCamara();
+}
+function infoCamara(){
+  const tr=camTrack(), v=$("#video"); if(!tr) return;
+  const nom=(tr.label||"cámara").replace(/\s*\([^)]*\)\s*$/,"");
+  $("#cam-info").textContent=`${nom} · ${v.videoWidth||"?"}×${v.videoHeight||"?"}`+(camZoom?` · zoom ${Math.round((camZoom.actual||1)*10)/10}×`:"");
+}
+async function listarCamaras(){
+  try{
+    const todas=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");
+    const traseras=todas.filter(d=>/back|rear|tras|environment|posterior/i.test(d.label));
+    camLista=traseras.length>=2?traseras:todas;
+  }catch(e){ camLista=[]; }
+  $("#cam-cambiar").hidden=camLista.length<2;
+}
+async function iniciarStream(deviceId){
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  const res={width:{ideal:3840},height:{ideal:2160}};
+  const video=deviceId?Object.assign({deviceId:{exact:deviceId}},res):Object.assign({facingMode:{ideal:"environment"}},res);
+  try{ camStream=await navigator.mediaDevices.getUserMedia({video,audio:false}); }
+  catch(e){ if(!deviceId) throw e; store.set("etq_cam",""); return iniciarStream(null); }
+  const tr=camTrack(); const cap=tr.getCapabilities?tr.getCapabilities():{};
+  // Enfoque continuo donde el teléfono lo permite (Android); en iPhone ya viene así.
+  try{ if(cap.focusMode&&cap.focusMode.includes("continuous")) await tr.applyConstraints({advanced:[{focusMode:"continuous"}]}); }catch(e){}
+  camZoom=cap.zoom&&cap.zoom.max>1?{min:cap.zoom.min||1,max:cap.zoom.max,actual:1}:null;
+  $("#cam-zoom").hidden=!camZoom; camLuz=false; $("#cam-luz").hidden=!cap.torch; $("#cam-luz").textContent="Luz";
+  const v=$("#video"); v.srcObject=camStream; try{ await v.play(); }catch(e){}
+  if(camZoom) await ponerZoom(2);
+  await listarCamaras(); infoCamara();
+}
 async function abrirCamara(modo){
   camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok"); prepararLector().catch(()=>{});
+  $("#cam-info").textContent=""; ["#cam-zoom","#cam-luz","#cam-cambiar"].forEach(s=>$(s).hidden=true);
   $("#cam-estado").textContent="Abriendo cámara…"; $("#cam-tot").textContent= modo==="cajas"?`Total del pallet: ${totalCajas().toLocaleString("en-US")} cajas`:"Apunta al código de barras de la etiqueta";
-  try{ camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}},audio:false}); }
+  try{ await iniciarStream(store.get("etq_cam")||null); }
   catch(e){ $("#cam-estado").textContent="No pude abrir la cámara. Dale permiso de cámara a esta página en el navegador."; return; }
   camActiva=true; ultimoCodigo=null; pausaHasta=0;
-  // Enfoque continuo donde el teléfono lo permite (Android); en iPhone ya viene así.
-  try{ const tr=camStream.getVideoTracks()[0]; const cap=tr.getCapabilities?tr.getCapabilities():{}; if(cap.focusMode&&cap.focusMode.includes("continuous")) await tr.applyConstraints({advanced:[{focusMode:"continuous"}]});
-    // Un poco de zoom deja leer etiquetas pequeñas sin acercar tanto el teléfono (que pierde el foco).
-    if(cap.zoom&&cap.zoom.max>=1.5) await tr.applyConstraints({advanced:[{zoom:Math.max(cap.zoom.min||1,1.5)}]}); }catch(e){}
-  const v=$("#video"); v.srcObject=camStream; try{ await v.play(); }catch(e){}
   $("#cam-estado").textContent= modo==="cajas"?"Apunta al código de barras de la caja":"Apunta al código de la etiqueta del pallet";
   let det=null;
   if("BarcodeDetector" in window){ try{ const sop=await BarcodeDetector.getSupportedFormats(); const f=["ean_13","ean_8","upc_a","upc_e","itf","code_128","code_39"].filter(x=>sop.includes(x)); if(f.length) det=new BarcodeDetector({formats:f}); }catch(e){} }
@@ -488,6 +532,14 @@ function cerrarCamara(){
 $("#cam-cajas").onclick=()=>abrirCamara("cajas");
 $("#cam-log").onclick=()=>abrirCamara("log");
 $("#cam-close").onclick=cerrarCamara;
+$("#cam-zoom").onclick=()=>{ if(!camZoom) return; const tope=Math.min(3,camZoom.max); const pasos=[1,2,3].filter(z=>z<tope).concat(tope); const i=pasos.findIndex(z=>z>(camZoom.actual||1)+0.05); ponerZoom(pasos[i<0?0:i]); };
+$("#cam-luz").onclick=async()=>{ const tr=camTrack(); if(!tr) return; try{ await tr.applyConstraints({advanced:[{torch:!camLuz}]}); camLuz=!camLuz; $("#cam-luz").textContent=camLuz?"Apagar luz":"Luz"; }catch(e){} };
+$("#cam-cambiar").onclick=async()=>{
+  if(camLista.length<2) return; const tr=camTrack(); const act=tr&&tr.getSettings?tr.getSettings().deviceId:"";
+  const sig=camLista[(camLista.findIndex(d=>d.deviceId===act)+1)%camLista.length];
+  $("#cam-info").textContent="Cambiando de cámara…"; store.set("etq_cam",sig.deviceId);
+  try{ await iniciarStream(sig.deviceId); }catch(e){ $("#cam-estado").textContent="No pude abrir esa cámara."; }
+};
 
 /* ---------- foto (para códigos pequeños o cuando la cámara en vivo no lee) ---------- */
 // La cámara del teléfono enfoca mejor de cerca que el video en vivo; la foto se lee a resolución completa.
