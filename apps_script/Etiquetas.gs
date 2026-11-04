@@ -7,12 +7,14 @@
  *   - pallets              una fila por pallet (mismas columnas que la pestaña de Streamlit)
  *   - codigos_cajas        códigos de barras aprendidos -> producto
  *   - productos_etiquetas  lista de productos (se sube desde la página, en Ajustes)
+ *   - codigos_internet     nombres que dieron las bases públicas de códigos (para no buscar dos veces)
  *
  * Cómo instalarlo (una sola vez):
  *   1. Abre el Google Sheet > Extensiones > Apps Script, borra lo que haya y pega este archivo.
  *   2. Cambia CLAVE (abajo) por la clave que van a usar los del almacén y guarda.
  *   3. Implementar > Nueva implementación > tipo "Aplicación web".
- *      Ejecutar como: Yo. Quién tiene acceso: Cualquier persona. Autoriza los permisos.
+ *      Ejecutar como: Yo. Quién tiene acceso: Cualquier persona. Autoriza los permisos
+ *      (incluye "conectarse a un servicio externo": es para buscar los códigos que no están en el inventario).
  *   4. Copia la URL que termina en /exec: es la que se pega en la página.
  * Si después cambias este código: Implementar > Gestionar implementaciones > editar > Nueva versión.
  */
@@ -23,7 +25,9 @@ const HOJA_CODIGOS = 'codigos_cajas';
 const HOJA_PRODUCTOS = 'productos_etiquetas';
 const COLS_PALLETS = ['id', 'fecha', 'dia', 'proveedor', 'po', 'ubicacion', 'pallet_n', 'pallets_lote',
   'contenido', 'items_json', 'total_cajas', 'anulado'];
-const COLS_CODIGOS = ['codigo', 'producto', 'sku', 'fecha'];
+const HOJA_INTERNET = 'codigos_internet';
+const COLS_CODIGOS = ['codigo', 'producto', 'sku', 'fecha', 'fuente'];
+const COLS_INTERNET = ['codigo', 'nombre', 'fuente', 'fecha'];
 const COLS_PRODUCTOS = ['producto', 'sku', 'qoh', 'actualizado'];
 // Columnas que Sheets convertiría en número (y perdería ceros o dígitos): se guardan como texto.
 const COMO_TEXTO = ['dia', 'po', 'codigo', 'sku'];
@@ -41,7 +45,8 @@ function doPost(e) {
       case 'pallets': return { pallets: pallets_() };
       case 'crear': return crear_(req.pallet || {}, req.copias);
       case 'crearLote': return crearLote_(req);
-      case 'codigo': return guardarCodigo_(req.codigo, req.producto, req.sku);
+      case 'codigo': return guardarCodigo_(req.codigo, req.producto, req.sku, req.fuente);
+      case 'buscarUpc': return buscarUpc_(req.codigo);
       case 'anular': return anular_(req.id);
       case 'productos': return subirProductos_(req.productos || []);
       default: throw new Error('Acción desconocida: ' + req.accion);
@@ -211,7 +216,7 @@ function crearLote_(req) {
   return guardarLote_(req, contenidos);
 }
 
-function guardarCodigo_(codigo, producto, sku) {
+function guardarCodigo_(codigo, producto, sku, fuente) {
   // Solo dígitos si es numérico; si trae letras (Code 128, como los X00… de Amazon), letras y números.
   codigo = String(codigo || '').trim().toUpperCase();
   codigo = /[A-Z]/.test(codigo) ? codigo.replace(/[^A-Z0-9]/g, '') : codigo.replace(/\D/g, '');
@@ -220,12 +225,77 @@ function guardarCodigo_(codigo, producto, sku) {
   return conLlave_(() => {
     const sh = hoja_(HOJA_CODIGOS, COLS_CODIGOS);
     const head = encabezado_(sh, COLS_CODIGOS);
-    const obj = { codigo: codigo, producto: producto, sku: String(sku || ''), fecha: ahora_().fecha };
+    const obj = { codigo: codigo, producto: producto, sku: String(sku || ''), fecha: ahora_().fecha, fuente: String(fuente || 'almacén') };
     const ya = leer_(HOJA_CODIGOS, COLS_CODIGOS).filter(c => c.codigo === codigo)[0];
     if (ya) sh.getRange(ya._fila, 1, 1, head.length).setValues([fila_(head, obj)]);
     else agregar_(HOJA_CODIGOS, COLS_CODIGOS, [obj]);
     return {};
   });
+}
+
+// ---------- códigos que no están en el inventario ----------
+// Busca el nombre del producto en bases públicas y gratis (Open Food Facts y UPCitemdb). Lo que se
+// encuentra queda en la pestaña codigos_internet; lo que no, se recuerda unas horas para no repetir.
+function buscarUpc_(codigo) {
+  const d = String(codigo || '').replace(/\D/g, '');
+  if (d.length < 8 || d.length > 14) return { nombre: '' };
+  const ya = leer_(HOJA_INTERNET, COLS_INTERNET).filter(r => r.codigo === d)[0];
+  if (ya) return { nombre: ya.nombre, fuente: ya.fuente };
+  const cache = CacheService.getScriptCache();
+  if (cache.get('upc0_' + d)) return { nombre: '' };
+  let r = null;
+  for (const c of variantesUpc_(d)) {
+    r = openFoodFacts_(c) || upcItemDb_(c);
+    if (r) break;
+  }
+  if (!r) { cache.put('upc0_' + d, '1', 6 * 3600); return { nombre: '' }; }
+  conLlave_(() => agregar_(HOJA_INTERNET, COLS_INTERNET, [{ codigo: d, nombre: r.nombre, fuente: r.fuente, fecha: ahora_().fecha }]));
+  return r;
+}
+
+// El mismo código escrito de las formas en que lo guardan las bases: UPC-A de 12, EAN-13, y para el
+// GTIN-14 de una caja, el código de adentro (sin el primer dígito y con su dígito de control).
+function variantesUpc_(d) {
+  const out = [];
+  const add = x => { if (x && out.indexOf(x) < 0) out.push(x); };
+  add(d);
+  if (d.length === 14 && d[0] === '0') add(d.slice(1));
+  const sin0 = d.replace(/^0+/, '');
+  if (sin0.length <= 12) { add(sin0.padStart(12, '0')); add(sin0.padStart(13, '0')); }
+  if (d.length === 14) { const cuerpo = d.slice(1, 13); add(cuerpo + digitoControl_(cuerpo)); }
+  return out.slice(0, 4);
+}
+
+function digitoControl_(sinDigito) {
+  let t = 0;
+  for (let i = sinDigito.length - 1, k = 3; i >= 0; i--, k = k === 3 ? 1 : 3) t += Number(sinDigito[i]) * k;
+  return String((10 - t % 10) % 10);
+}
+
+function pedir_(url) {
+  try {
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'User-Agent': 'EtiquetasPallet/1.0' } });
+    if (res.getResponseCode() !== 200) return null;
+    return JSON.parse(res.getContentText());
+  } catch (err) { return null; }
+}
+
+function openFoodFacts_(c) {
+  const j = pedir_('https://world.openfoodfacts.org/api/v2/product/' + c + '.json?fields=product_name,brands,quantity');
+  const p = j && j.status === 1 && j.product;
+  if (!p || !p.product_name) return null;
+  const marca = String(p.brands || '').split(',')[0].trim();
+  let nombre = String(p.product_name).trim();
+  if (marca && nombre.toUpperCase().indexOf(marca.toUpperCase()) < 0) nombre = marca + ' ' + nombre;
+  if (p.quantity) nombre += ' ' + String(p.quantity).trim();
+  return { nombre: nombre.replace(/\s+/g, ' ').slice(0, 120), fuente: 'Open Food Facts' };
+}
+
+function upcItemDb_(c) {
+  const j = pedir_('https://api.upcitemdb.com/prod/trial/lookup?upc=' + c);
+  const it = j && j.items && j.items[0];
+  if (!it || !it.title) return null;
+  return { nombre: String(it.title).replace(/\s+/g, ' ').trim().slice(0, 120), fuente: 'UPCitemdb' };
 }
 
 function anular_(id) {

@@ -403,7 +403,7 @@ function renderLines(){
         if(qoh>0){ const st=document.createElement("span"); st.className="stock"; st.textContent=qoh.toLocaleString("en-US")+" en inventario"; b.append(st); }
         b.append(n); if(sku){ const sm=document.createElement("small"); sm.textContent="  · "+sku; b.append(sm); }
         b.onmousedown=e=>e.preventDefault();
-        b.onclick=()=>{ ln.desc=n; ln.sku=sku; d.value=n; sg.hidden=true; learnPending(n,sku); };
+        b.onclick=()=>{ ln.desc=n; ln.sku=sku; d.value=n; sg.hidden=true; if(ln.codigo){ const c=ln.codigo; ln.codigo=""; aprender(c,n,sku,"almacén"); } else learnPending(n,sku); };
         sg.appendChild(b); });
       sg.hidden=!r.length; };
     d.onblur=()=>setTimeout(()=>sg.hidden=true,150);
@@ -464,10 +464,54 @@ function handleScan(raw){
   const d=codeKey(raw); if(d.length<(/^\d+$/.test(d)?6:4)){ setScanMsg(msg,`El código ${raw} no parece de una caja. Intenta otra vez.`,"warn"); return null; }
   const hit=lookup(d);
   if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; ultimoAgregado=hit.name; const t=`+1 ${hit.name} (van ${state.lines[i].qty} en el pallet #${state.pal})`; setScanMsg(msg,t,"ok"); return t; }
-  pendingCode=d; const last=state.lines[state.lines.length-1]; if(last.desc||last.qty) state.lines.push(lineaNueva({qty:"1"})); else { last.qty="1"; last.pal=state.pal; }
-  renderLines(); updTotal(); cerrarCamara(); const i=state.lines.length-1; $("#desc"+i).focus();
-  setScanMsg(msg,`El código ${d} todavía no está guardado. Busca el producto abajo y tócalo: la próxima vez saldrá solo.`,"warn");
-  return null;
+  // No está en el inventario: la caja se cuenta igual y el nombre se busca en internet, sin que el
+  // del almacén tenga que hacer nada. Si no aparece, queda "SIN IDENTIFICAR" y se corrige en la oficina.
+  const w=WEB.get(d); const nombre=w&&w.name||sinIdentificar(d);
+  const i=addProduct(nombre,w&&w.sku||""); state.lines[i].codigo=w&&w.sku?"":d; pendingCode=null; ultimoAgregado=nombre;
+  if(!w) buscarEnInternet(d);
+  const t=w&&w.name?`UPC no encontrado en inventario: ${w.web||w.name} (van ${state.lines[i].qty} en el pallet #${state.pal})`
+    :`UPC ${d} no encontrado en inventario. Contada igual; buscando el nombre… (van ${state.lines[i].qty})`;
+  setScanMsg(msg,t,"warn"); return t;
+}
+const WEB=new Map(); // código -> {name, sku, web} de lo que se buscó en internet en esta sesión
+function sinIdentificar(d){ return `SIN IDENTIFICAR · ${d}`; }
+async function buscarEnInternet(d){
+  WEB.set(d,{name:"",sku:""}); let j;
+  try{ j=await api("buscarUpc",{codigo:d}); }
+  catch(e){ WEB.delete(d); if(/Acci[oó]n desconocida/.test(e.message)) avisoUpc(`UPC ${d} no encontrado en inventario. Para buscarlo en internet hay que actualizar el Apps Script.`); return; }
+  const web=String(j.nombre||"").trim();
+  if(!web){ avisoUpc(`UPC ${d} no encontrado en inventario ni en internet: queda como SIN IDENTIFICAR para corregirlo en la oficina.`); return; }
+  const m=parecido(web,d); const name=m?m.n:web.toUpperCase(), sku=m?m.sku:"";
+  WEB.set(d,{name,sku,web});
+  // Los renglones que ya se contaron con este código toman el nombre (y se juntan si ya había uno igual).
+  for(const ln of [...state.lines]){ if(ln.codigo!==d) continue;
+    const otro=state.lines.find(x=>x!==ln&&x.desc===name&&(x.pal||1)===(ln.pal||1));
+    if(otro){ otro.qty=String((parseFloat(otro.qty)||0)+(parseFloat(ln.qty)||0)); state.lines.splice(state.lines.indexOf(ln),1); }
+    else { ln.desc=name; ln.sku=sku; if(m) ln.codigo=""; } }
+  if(ultimaSuma===sinIdentificar(d)) ultimaSuma=name;
+  renderLines(); updTotal(); if(camActiva) camTotal();
+  avisoUpc(`UPC no encontrado en inventario: ${web}`+(m?` → en QB es ${m.n}`:""));
+  if(m) aprender(d,m.n,m.sku,"internet");
+}
+function avisoUpc(t){ setScanMsg($("#scanmsg"),t,"warn"); if(camActiva){ $("#cam-ultimo").hidden=false; $("#cam-ultimo-txt").textContent=t; } }
+async function aprender(code,name,sku,fuente){
+  CODES.set(code,{name,sku}); addToIndex(name,sku,0);
+  try{ await api("codigo",{codigo:code,producto:name,sku,fuente}); }catch(e){}
+}
+// ¿El nombre que dio internet es uno de los productos de QB? Solo si dicen lo mismo: todas las palabras
+// del nombre de QB están en el de internet y al revés (sin contar palabras genéricas como SODA o PACK),
+// y el tamaño no choca. Así "Dr Pepper Soda 12 pack" no se confunde con Dr Pepper Diet o Cherry. Si hay
+// más de un producto que cumple, no se elige ninguno y la etiqueta lleva el nombre de internet.
+const NO_CUENTA=new Set(["CAN","CANS","LATA","LATAS","PACK","PK","PACKS","OZ","FL","X","THE","OF","AND","DE","Y","BOTTLE","BOTTLES","BTL","CT","COUNT","EA","UNIT","UNITS","ML","L","LB","NET","WT","SODA","SOFT","DRINK","DRINKS","BEVERAGE","CARBONATED","ORIGINAL","REGULAR","CLASSIC","FLAVORED","FLAVOR","CASE","CAJA","IN","WITH","A"]);
+function palabras(t){ const w=norm(String(t).replace(/(\d)([a-z])/gi,"$1 $2").replace(/([a-z])(\d)/gi,"$1 $2")).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  return { w:new Set(w.filter(x=>!/^\d+$/.test(x)&&!NO_CUENTA.has(x))), n:new Set(w.filter(x=>/^\d+$/.test(x))) }; }
+function parecido(web,d){
+  const A=palabras(web); if(A.w.size<2) return null; const hits=[];
+  for(const p of INDEX){ const B=palabras(p.n); if(!B.w.size||B.w.size!==A.w.size) continue;
+    let igual=true; for(const x of B.w) if(!A.w.has(x)){ igual=false; break; } if(!igual) continue;
+    if(A.n.size&&B.n.size&&![...B.n].some(x=>A.n.has(x))) continue;
+    hits.push(p); }
+  return hits.length===1?hits[0]:null;
 }
 async function learnPending(name,sku){
   if(!pendingCode) return; const code=pendingCode; pendingCode=null;
