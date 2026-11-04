@@ -65,6 +65,9 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 .sugg .stock{float:right;color:var(--ok);font-size:13px;margin-left:8px}
 .del{height:46px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted);font-size:20px;cursor:pointer}
 .add{font:600 16px var(--body);padding:11px;border:1px dashed var(--line);border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+.addrow{display:flex;gap:8px}.addrow .add{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
+.add small{font:500 12px var(--body);color:var(--muted)}
+.add.nuevo{border:2px solid var(--accent);background:var(--accent-soft);font-weight:700}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid2>div{display:flex;flex-direction:column;gap:6px;min-width:0}
 .big{font:700 20px var(--display);letter-spacing:.04em;text-transform:uppercase;padding:16px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer;width:100%}
@@ -178,7 +181,7 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
         <div class="scanmsg" id="scanmsg">Cada caja escaneada suma 1. Si son muchas iguales, escanea una y escribe las cajas.</div>
         <div class="row muted" style="font-size:13px"><span style="text-align:center">Pallet</span><span style="text-align:center">Cajas</span><span>Producto</span><span></span></div>
         <div id="lines" style="display:flex;flex-direction:column;gap:8px"></div>
-        <button class="add" id="addline">+ Otro producto</button>
+        <div class="addrow"><button class="add" id="addline">+ Otro producto<small id="addline-sub">en el pallet #1</small></button><button class="add nuevo" id="palnext2">+ Nuevo pallet<small id="palnext2-sub">empieza el pallet #2</small></button></div>
         <div class="total"><span id="totlab">Total cajas del pallet</span><span id="tot">0</span></div>
         <div class="palsub" id="totpal" hidden></div>
       </div>
@@ -428,11 +431,16 @@ function updTotal(){
   // "Pallets iguales" es para un solo contenido repetido; con varios pallets distintos no aplica.
   $("#copiesrow").hidden=varios; if(varios) $("#copies").value="1";
   $("#palact").textContent=`pallet #${state.pal}`;
+  const ult=state.lines[state.lines.length-1], palUlt=ult?(ult.pal||1):state.pal;
+  const vacio=!state.lines.some(l=>(l.pal||1)===state.pal&&(l.desc.trim()||(parseFloat(l.qty)||0)>0));
+  $("#addline-sub").textContent=`en el pallet #${palUlt}`;
+  $("#palnext2-sub").textContent=vacio?`el #${state.pal} está vacío`:`empieza el pallet #${Math.max(state.pal,...state.lines.map(l=>l.pal||1))+1}`;
   $("#gen").textContent= varios?`Generar ${usados.length} etiquetas`:"Generar etiqueta";
 }
 // "+ Otro producto" sigue en el pallet del último renglón; para empezar otro pallet está "Siguiente pallet".
 $("#addline").onclick=()=>{ const last=state.lines[state.lines.length-1]; if(last) state.pal=last.pal||1;
   state.lines.push(lineaNueva()); renderLines(); updTotal(); setScanMsg($("#scanmsg"),"",""); $("#qty"+(state.lines.length-1)).focus(); };
+$("#palnext2").onclick=()=>{ $("#palnext").onclick(); $("#qty"+(state.lines.length-1)).focus(); };
 $("#palnext").onclick=()=>{
   const max=Math.max(state.pal,...state.lines.map(l=>l.pal||1));
   const actualVacio=!state.lines.some(l=>(l.pal||1)===state.pal&&(l.desc.trim()||(parseFloat(l.qty)||0)>0));
