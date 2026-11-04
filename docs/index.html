@@ -392,7 +392,9 @@ function renderLines(){
   state.lines.forEach((ln,i)=>{
     const row=document.createElement("div"); row.className="row";
     const pl=document.createElement("input"); pl.className="pal"; pl.type="number"; pl.inputMode="numeric"; pl.min="1"; pl.value=ln.pal||1; pl.id="pal"+i; pl.setAttribute("aria-label","Número de pallet");
-    pl.oninput=()=>{ ln.pal=Math.max(1,parseInt(pl.value,10)||1); updTotal(); };
+    // Cambiar el # a mano también mueve el pallet actual: lo que se escanee o agregue después va a ese.
+    pl.oninput=()=>{ if(pl.value==="") return; ln.pal=Math.max(1,parseInt(pl.value,10)||1); state.pal=ln.pal; updTotal(); setScanMsg($("#scanmsg"),"",""); };
+    pl.onblur=()=>{ if(pl.value==="") pl.value=ln.pal||1; };
     const q=document.createElement("input"); q.className="qty"; q.type="number"; q.inputMode="numeric"; q.min="0"; q.placeholder="0"; q.value=ln.qty; q.id="qty"+i; q.setAttribute("aria-label","Cajas");
     q.oninput=()=>{ ln.qty=q.value; updTotal(); };
     const wrap=document.createElement("div"); wrap.className="prodwrap";
@@ -428,7 +430,9 @@ function updTotal(){
   $("#palact").textContent=`pallet #${state.pal}`;
   $("#gen").textContent= varios?`Generar ${usados.length} etiquetas`:"Generar etiqueta";
 }
-$("#addline").onclick=()=>{ state.lines.push(lineaNueva()); renderLines(); $("#qty"+(state.lines.length-1)).focus(); };
+// "+ Otro producto" sigue en el pallet del último renglón; para empezar otro pallet está "Siguiente pallet".
+$("#addline").onclick=()=>{ const last=state.lines[state.lines.length-1]; if(last) state.pal=last.pal||1;
+  state.lines.push(lineaNueva()); renderLines(); updTotal(); setScanMsg($("#scanmsg"),"",""); $("#qty"+(state.lines.length-1)).focus(); };
 $("#palnext").onclick=()=>{
   const max=Math.max(state.pal,...state.lines.map(l=>l.pal||1));
   const actualVacio=!state.lines.some(l=>(l.pal||1)===state.pal&&(l.desc.trim()||(parseFloat(l.qty)||0)>0));
