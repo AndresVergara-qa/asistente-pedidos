@@ -553,7 +553,7 @@ const cvVivo=document.createElement("canvas"), ctxVivo=cvVivo.getContext("2d",{w
 // código pequeño que ocupa poco del ancho) o "todo" (el cuadro entero reducido, para códigos grandes o torcidos).
 function zona(modo,vw,vh){
   if(modo==="todo") return [0,0,vw,vh];
-  const bh=Math.round(vh*0.4), y=Math.round((vh-bh)/2);
+  const bh=Math.round(vh*0.6), y=Math.round((vh-bh)/2);
   if(modo==="centro"){ const w=Math.round(vw*0.6); return [Math.round((vw-w)/2),y,w,bh]; }
   return [0,y,vw,bh];
 }
@@ -579,19 +579,19 @@ async function loopWasm(conNativo){
   const v=$("#video");
   // Con el lector propio del teléfono (Android) este va despacio y solo mira alrededor de la línea:
   // es de apoyo, y cada cuadro que se saca del video a 4K cuesta. Sin él (iPhone) mira también el cuadro entero.
-  const cada=conNativo?500:150, modos=conNativo?["franja","centro"]:["franja","centro","todo"];
+  const cada=conNativo?350:150, modos=["franja","centro","todo"];
   let vuelta=0;
   while(camActiva){
     if(v.readyState>=2&&v.videoWidth){ try{ const t=await leerCuadro(v,modos[vuelta++%modos.length]); if(t) leidoCamara(t); }catch(e){} }
     await new Promise(r=>setTimeout(r,cada));
   }
 }
-// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo, a menos. Se pide hasta 4K: con 1080p
-// no leía la regla. Andrés pidió quitar el zoom, la luz y los botones de arriba (le daban lag).
+// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo, a menos. Se pide 1440p: con 1080p
+// no leía la regla de Amazon y con 4K la cámara tardaba en abrir y en leer. Andrés pidió quitar el zoom, la luz y los botones de arriba (le daban lag).
 function camTrack(){ return camStream?camStream.getVideoTracks()[0]:null; }
 async function iniciarStream(deviceId){
   if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
-  const res={width:{ideal:3840},height:{ideal:2160}};
+  const res={width:{ideal:2560},height:{ideal:1440}};
   // Si antes se eligió otra cámara trasera, se sigue usando esa.
   const video=deviceId?Object.assign({deviceId:{exact:deviceId}},res):Object.assign({facingMode:{ideal:"environment"}},res);
   try{ camStream=await navigator.mediaDevices.getUserMedia({video,audio:false}); }
