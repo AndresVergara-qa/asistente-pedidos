@@ -75,6 +75,11 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 .msg.ok{background:transparent;border:1px solid var(--ok);color:var(--ok)}
 .preview{display:flex;flex-direction:column;gap:10px;align-items:stretch}
 .preview canvas{width:100%;max-width:360px;align-self:center;height:auto;border:1px solid var(--line);border-radius:4px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px}
+.thumbs button{flex:0 0 auto;padding:0;border:2px solid var(--line);border-radius:4px;background:#fff;cursor:pointer;position:relative}
+.thumbs button[aria-current="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.thumbs img{display:block;width:72px;height:108px}
+.thumbs span{position:absolute;left:0;right:0;bottom:0;font:700 12px var(--display);background:rgba(0,0,0,.65);color:#fff;text-align:center}
 .pagenav{display:flex;justify-content:center;align-items:center;gap:12px;font-family:var(--display);font-weight:700}
 .paper,.btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .btns>*{flex:1}
@@ -203,6 +208,8 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 
     <section id="out" class="card preview" hidden>
       <div class="step" id="outtitle">Etiqueta</div>
+      <div class="scanmsg ok" id="lotemsg" hidden></div>
+      <div class="thumbs" id="thumbs" hidden></div>
       <canvas id="cv" width="812" height="1218"></canvas>
       <div class="pagenav" id="pagenav" hidden>
         <button class="ghost" id="prev" aria-label="Anterior">‹</button><span id="pageinfo">1 / 1</span><button class="ghost" id="next" aria-label="Siguiente">›</button>
@@ -714,8 +721,8 @@ function drawLabel(cv,p){
   y+=96; box(M,y,W-2*M,230);
   lab("ID DEL PALLET",M+16,y+34);
   const bc=document.createElement("canvas");
-  try{ JsBarcode(bc,p.id,{format:"CODE128",displayValue:false,margin:0,height:110,width:3}); }catch(e){}
-  const bw=Math.min(bc.width||0,W-2*M-40); if(bw) ctx.drawImage(bc,(W-bw)/2,y+48,bw,110);
+  try{ JsBarcode(bc,p.id,{format:"CODE128",displayValue:false,margin:0,height:116,width:4}); }catch(e){}
+  const bw=Math.min(bc.width||0,W-2*M-40); if(bw) ctx.drawImage(bc,(W-bw)/2,y+46,bw,116);
   ctx.textAlign="center"; ctx.font=`800 58px ${F}`; ctx.fillText(p.id,W/2,y+214); ctx.textAlign="left";
   // contenido: el encabezado lleva el número de pallet, las cajas de abajo son las de ESTE pallet
   y+=230; const footH=86; const cH=H-M-footH-y; box(M,y,W-2*M,cH);
@@ -734,14 +741,23 @@ function drawLabel(cv,p){
   lab(`TOTAL CAJAS DEL PALLET #${n}`,M+16,y+52); ctx.textAlign="right"; ctx.font=`800 64px ${F}`; ctx.fillText(fmtNum(p.total_cajas),W-M-16,y+66); ctx.textAlign="left";
   if(p.anulado){ ctx.save(); ctx.translate(W/2,H/2); ctx.rotate(-0.5); ctx.font=`800 150px ${F}`; ctx.textAlign="center"; ctx.fillStyle="rgba(200,0,0,.75)"; ctx.fillText("ANULADO",0,0); ctx.restore(); }
 }
-async function openLabels(list){
+async function openLabels(list,desde,aviso){
   try{ await document.fonts.load('800 50px "Barlow Condensed"'); await document.fonts.load('600 26px "Barlow Condensed"'); }catch(e){}
-  state.current=list; state.page=0; $("#out").hidden=false; $("#outmsg").hidden=true;
+  state.current=list; state.page=Math.max(0,Math.min(list.length-1,desde||0)); $("#out").hidden=false; $("#outmsg").hidden=true;
   $("#outtitle").textContent = list.length>1 ? `${list.length} etiquetas · ${list[0].id} a ${list[list.length-1].id}` : `Etiqueta ${list[0].id}`;
-  $("#pagenav").hidden = list.length<2; drawPage(); renderVoid();
+  $("#lotemsg").hidden=!aviso; $("#lotemsg").textContent=aviso||"";
+  $("#pagenav").hidden = list.length<2; drawThumbs(); drawPage(); renderVoid();
   $("#out").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
 }
-function drawPage(){ drawLabel($("#cv"),state.current[state.page]); $("#pageinfo").textContent=`${state.page+1} / ${state.current.length}`; }
+function drawPage(){ drawLabel($("#cv"),state.current[state.page]); $("#pageinfo").textContent=`${state.page+1} / ${state.current.length}`;
+  $("#thumbs").querySelectorAll("button").forEach((b,i)=>b.setAttribute("aria-current",String(i===state.page))); }
+// Vista previa de todas las etiquetas del lote: tocar una la abre en grande.
+function drawThumbs(){ const box=$("#thumbs"); box.textContent=""; const list=state.current; box.hidden=list.length<2; if(list.length<2) return;
+  const cv=document.createElement("canvas"); cv.width=W; cv.height=H; const sm=document.createElement("canvas"); sm.width=144; sm.height=216;
+  list.forEach((p,i)=>{ drawLabel(cv,p); sm.getContext("2d").drawImage(cv,0,0,144,216);
+    const b=document.createElement("button"); b.setAttribute("aria-label",`Etiqueta ${i+1}: ${p.id}`); const im=new Image(); im.src=sm.toDataURL("image/png"); im.alt="";
+    const t=document.createElement("span"); t.textContent=`${p.pallet_n||i+1} de ${p.pallets_lote||list.length}`; b.append(im,t);
+    b.onclick=()=>{ state.page=i; drawPage(); renderVoid(); }; box.appendChild(b); }); }
 $("#prev").onclick=()=>{ if(state.page>0){ state.page--; drawPage(); renderVoid(); } };
 $("#next").onclick=()=>{ if(state.page<state.current.length-1){ state.page++; drawPage(); renderVoid(); } };
 function setPaper(p){ state.paper=p; $("#p46").setAttribute("aria-pressed",String(p==="4x6")); $("#pletter").setAttribute("aria-pressed",String(p==="letter")); }
@@ -783,14 +799,28 @@ function renderLog(){
     const cj=document.createElement("span"); cj.className="cj"; cj.textContent=`${fmtNum(p.total_cajas)} cj`;
     const pv=document.createElement("span"); pv.className="prov"; pv.textContent=p.proveedor+(p.pallets_lote>1?` · pallet ${p.pallet_n} de ${p.pallets_lote}`:"")+(p.po?` · PO ${p.po}`:"");
     const mt=document.createElement("span"); mt.className="meta"; mt.textContent=`${fmtDate(p.fecha)} · ${(p.items||[]).map(i=>`${fmtNum(i.cajas)} ${i.producto}`).join(", ")}${p.anulado?" · ANULADO":""}`;
-    b.append(id,cj,pv,mt); b.onclick=()=>openLabels([p]); box.appendChild(b);
+    b.append(id,cj,pv,mt); b.onclick=()=>abrirConLote(p); box.appendChild(b);
   }
 }
 $("#q").addEventListener("input",()=>{ $("#qmsg").textContent=""; renderLog(); });
 $("#q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); findPallet(e.target.value); } });
-function findPallet(v){ v=String(v||"").trim().toUpperCase(); if(!v) return;
-  const p=state.pallets.find(x=>x.id===v); if(p){ openLabels([p]); setScanMsg($("#qmsg"),"",""); renderLog(); }
-  else if(/^CD-/.test(v)) setScanMsg($("#qmsg"),`No encontré el pallet ${v} en el registro.`,"warn"); else renderLog(); }
+// Las etiquetas que se guardaron juntas tienen IDs seguidos del mismo día: de ahí salen las demás del lote.
+function loteDe(p){ const N=Number(p.pallets_lote)||1, n=Number(p.pallet_n)||1, m=/^CD-(\d{6})-(\d+)$/.exec(p.id||"");
+  if(N<2||!m) return [p]; const base=parseInt(m[2],10)-(n-1), out=[];
+  for(let k=0;k<N;k++){ const id=`CD-${m[1]}-${String(base+k).padStart(2,"0")}`; const x=state.pallets.find(y=>y.id===id);
+    if(x&&x.proveedor===p.proveedor&&Number(x.pallets_lote)===N) out.push(x); }
+  return out.length?out:[p]; }
+function abrirConLote(p){ const lote=loteDe(p), N=Number(p.pallets_lote)||1;
+  let aviso=""; if(N>1) aviso=`Este es el pallet ${p.pallet_n} de ${N}. Son estas ${N} etiquetas`+(lote.length<N?` (encontré ${lote.length})`:"")+".";
+  return openLabels(lote,lote.indexOf(p),aviso); }
+async function findPallet(v){ v=String(v||"").trim().toUpperCase(); if(!v) return;
+  let p=state.pallets.find(x=>x.id===v);
+  // Si no está en lo que ya bajó el teléfono (otra persona la hizo, o el registro aún no carga), se vuelve a pedir.
+  if(!p&&/^CD-/.test(v)){ setScanMsg($("#qmsg"),`Buscando ${v}…`,"");
+    try{ const j=await api("pallets"); state.pallets=j.pallets||[]; }catch(e){ setScanMsg($("#qmsg"),"No pude leer el registro: "+e.message,"warn"); return; }
+    p=state.pallets.find(x=>x.id===v); }
+  if(p){ setScanMsg($("#qmsg"),"",""); renderLog(); await abrirConLote(p); }
+  else if(/^CD-/.test(v)){ setScanMsg($("#qmsg"),`No encontré el pallet ${v} en el registro.`,"warn"); renderLog(); } else renderLog(); }
 function openById(id){ showTab("log"); $("#q").value=id; renderLog(); findPallet(id); }
 function showTab(t){ $("#tab-new").setAttribute("aria-selected",String(t==="new")); $("#tab-log").setAttribute("aria-selected",String(t==="log"));
   $("#view-new").hidden=t!=="new"; $("#view-new").style.display=t==="new"?"flex":"none"; $("#view-log").hidden=t!=="log"; $("#view-log").style.display=t==="log"?"flex":"none";
