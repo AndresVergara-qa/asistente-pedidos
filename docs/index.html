@@ -253,8 +253,9 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 // Link del Apps Script (Implementar > Aplicación web). Si se cambia la implementación, se actualiza aquí o en Ajustes.
 const API_URL = "https://script.google.com/macros/s/AKfycby_od_FO9J6ANdrYphcL94N57sQoV8Yql34Iv9EHvlaPXosR4R-KZ97oYPyf_0ObzHM/exec";
 
-const SUPPLIERS = ["KDP (American Bottling)","Pepsi","Coca-Cola Florida","Millet","Gold Coast","BJ's","Sam's Club","Jetro"];
-const MORE_SUPPLIERS = ["GOYA Foods of Florida","US Foods","AZ Southeast Distributors","Miami Beverages","Guixen","Eagle Brands","Savys Specialty Foods"];
+// Proveedores de las Bills de QBO (oct-2025 a sep-2026, tabla proveedor por producto). E-Florida no va: es la propia empresa.
+const SUPPLIERS = ["KDP (American Bottling)","Pepsi","Gold Coast","Millet","Goya","Iberia","BJ's","Breakthru"];
+const MORE_SUPPLIERS = ["US Foods","Sun Wholesale","Snackify 26","Eagle Brands","Roma Food Group","Guixens Food Group","Jetro","Sam's Club","One World Distributors","Sunshine Bottling","Sure Pack","Costco","Savys Specialty Foods","Miami Beverages","Ravi's Wholesale","Macna Group","Laugin Solutions"];
 
 const $ = s => document.querySelector(s);
 const store = {
