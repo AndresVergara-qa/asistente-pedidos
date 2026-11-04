@@ -127,7 +127,7 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
   <!-- Configuración: link del Apps Script y clave del almacén -->
   <section id="view-setup" class="card" hidden>
     <div class="step">Conectar con el Google Sheet</div>
-    <div style="display:flex;flex-direction:column;gap:6px"><label for="cfg-api">Link del Apps Script (termina en /exec)</label><input id="cfg-api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
+    <div hidden style="display:flex;flex-direction:column;gap:6px"><label for="cfg-api">Link del Apps Script (termina en /exec)</label><input id="cfg-api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
     <div style="display:flex;flex-direction:column;gap:6px"><label for="cfg-clave">Clave del almacén</label><input id="cfg-clave" type="password" autocomplete="off"></div>
     <button class="big" id="cfg-ok">Conectar</button>
     <div id="cfg-msg" class="msg" hidden></div>
@@ -143,7 +143,7 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
     <div id="aj-msg" class="msg" hidden></div>
     <div class="btns">
       <button class="ghost" id="aj-recargar">Recargar datos</button>
-      <button class="ghost" id="aj-conexion">Cambiar link o clave</button>
+      <button class="ghost" id="aj-conexion">Cambiar clave</button>
     </div>
     <button class="ghost" id="aj-cerrar">Cerrar ajustes</button>
   </section>
@@ -251,7 +251,8 @@ const store = {
   get(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } },
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
 };
-const cfg = { api: store.get("etq_api") || API_URL, clave: store.get("etq_clave") };
+// El link del Apps Script va fijo (API_URL): cada teléfono solo escribe la clave.
+const cfg = { api: API_URL, clave: store.get("etq_clave") };
 const state = { prov:"", pal:1, lines:[{qty:"",desc:"",sku:"",pal:1}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
 let INDEX=[], NAMES=new Set(), BYKEY=new Map(), BYSKU=new Map(), BYNUM=new Map(); const CODES=new Map(); let pendingCode=null;
 
@@ -285,9 +286,9 @@ function mostrar(v){
   $("#main").hidden = v==="setup"; $("#main").style.display = v==="setup"?"none":"flex";
 }
 $("#cfg-ok").onclick=async()=>{
-  cfg.api=$("#cfg-api").value.trim(); cfg.clave=$("#cfg-clave").value;
+  cfg.api=$("#cfg-api").value.trim()||API_URL; cfg.clave=$("#cfg-clave").value;
   const m=$("#cfg-msg"); m.hidden=true; $("#cfg-ok").disabled=true;
-  try{ const j=await api("inicio"); store.set("etq_api",cfg.api); store.set("etq_clave",cfg.clave); cargarInicio(j); mostrar("main"); if(!INDEX.length) mostrar("ajustes"); }
+  try{ const j=await api("inicio"); store.set("etq_clave",cfg.clave); cargarInicio(j); mostrar("main"); if(!INDEX.length) mostrar("ajustes"); }
   catch(e){ showMsg(m,e.message); }
   finally{ $("#cfg-ok").disabled=false; }
 };
@@ -800,7 +801,7 @@ $("#tab-new").onclick=()=>showTab("new"); $("#tab-log").onclick=()=>showTab("log
 /* ---------- arranque ---------- */
 // Un link con #api=...&clave=... deja configurado el teléfono de una vez (y se borra de la barra).
 function leerHash(){ const h=new URLSearchParams(location.hash.slice(1));
-  if(h.get("api")){ cfg.api=h.get("api"); store.set("etq_api",cfg.api); }
+  if(h.get("api")){ cfg.api=h.get("api"); }
   if(h.get("clave")){ cfg.clave=h.get("clave"); store.set("etq_clave",cfg.clave); }
   const habia=!!(h.get("api")||h.get("clave")); if(habia) history.replaceState(null,"",location.pathname+location.search); return habia; }
 function iniciar(){ if(cfg.api && cfg.clave) arrancar(); else { $("#cfg-api").value=cfg.api; mostrar("setup"); $("#conn").textContent="Sin configurar"; } }
