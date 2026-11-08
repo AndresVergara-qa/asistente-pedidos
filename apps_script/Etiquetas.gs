@@ -24,7 +24,7 @@ const HOJA_PALLETS = 'pallets';
 const HOJA_CODIGOS = 'codigos_cajas';
 const HOJA_PRODUCTOS = 'productos_etiquetas';
 const COLS_PALLETS = ['id', 'fecha', 'dia', 'proveedor', 'po', 'ubicacion', 'pallet_n', 'pallets_lote',
-  'contenido', 'items_json', 'total_cajas', 'anulado'];
+  'contenido', 'items_json', 'total_cajas', 'anulado', 'recibido_por'];
 const HOJA_INTERNET = 'codigos_internet';
 const COLS_CODIGOS = ['codigo', 'producto', 'sku', 'fecha', 'fuente'];
 const COLS_INTERNET = ['codigo', 'nombre', 'fuente', 'fecha'];
@@ -148,7 +148,7 @@ function pallets_() {
       try { items = JSON.parse(p.items_json || '[]'); } catch (e) { items = []; }
       return {
         id: p.id, fecha: p.fecha, dia: p.dia, proveedor: p.proveedor, po: p.po, ubicacion: p.ubicacion,
-        pallet_n: Number(p.pallet_n) || 1, pallets_lote: Number(p.pallets_lote) || 1, items: items,
+        recibido_por: p.recibido_por || '', pallet_n: Number(p.pallet_n) || 1, pallets_lote: Number(p.pallets_lote) || 1, items: items,
         total_cajas: Number(String(p.total_cajas).replace(/,/g, '')) || 0,
         anulado: String(p.anulado).toUpperCase() === 'TRUE',
       };
@@ -187,7 +187,7 @@ function guardarLote_(p, contenidos) {
     const nuevos = contenidos.map((items, k) => ({
       id: 'CD-' + t.dia + '-' + String(desde + k).padStart(2, '0'), fecha: t.fecha, dia: t.dia,
       proveedor: proveedor, po: String(p.po || '').trim(), ubicacion: String(p.ubicacion || '').trim(),
-      pallet_n: k + 1, pallets_lote: n, contenido: items.map(i => i.cajas + ' ' + i.producto).join('; '),
+      recibido_por: String(p.recibido_por || '').trim(), pallet_n: k + 1, pallets_lote: n, contenido: items.map(i => i.cajas + ' ' + i.producto).join('; '),
       items_json: JSON.stringify(items), total_cajas: items.reduce((a, i) => a + i.cajas, 0), anulado: '',
       _items: items,
     }));
@@ -195,7 +195,7 @@ function guardarLote_(p, contenidos) {
     return {
       pallets: nuevos.map(x => ({
         id: x.id, fecha: x.fecha, dia: x.dia, proveedor: x.proveedor, po: x.po, ubicacion: x.ubicacion,
-        pallet_n: x.pallet_n, pallets_lote: x.pallets_lote, items: x._items, total_cajas: x.total_cajas, anulado: false,
+        recibido_por: x.recibido_por, pallet_n: x.pallet_n, pallets_lote: x.pallets_lote, items: x._items, total_cajas: x.total_cajas, anulado: false,
       })),
     };
   });

@@ -164,10 +164,12 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline
 
     <section id="view-new" style="display:flex;flex-direction:column;gap:14px">
       <div class="card">
-        <div class="step">1 · Proveedor</div>
+        <div class="step">1 · Proveedor y quién recibe</div>
         <div class="chips" id="chips"></div>
         <input id="prov" list="provlist" placeholder="O escribe otro proveedor" autocomplete="off">
         <datalist id="provlist"></datalist>
+        <label>Recibido por</label>
+        <div class="chips" id="recv"></div>
       </div>
 
       <div class="card">
@@ -265,7 +267,9 @@ const store = {
 };
 // El link del Apps Script va fijo (API_URL): cada teléfono solo escribe la clave.
 const cfg = { api: API_URL, clave: store.get("etq_clave") };
-const state = { prov:"", pal:1, lines:[{qty:"",desc:"",sku:"",pal:1}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
+// Quién recibe la mercancía. El teléfono recuerda el último elegido.
+const RECIBEN = ["Darian","Freddy","Jose","Job"];
+const state = { recv:store.get("etq_recv"), prov:"", pal:1, lines:[{qty:"",desc:"",sku:"",pal:1}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
 let INDEX=[], NAMES=new Set(), BYKEY=new Map(), BYSKU=new Map(), BYNUM=new Map(); const CODES=new Map(); let pendingCode=null;
 
 /* ---------- conexión con el Apps Script ---------- */
@@ -356,6 +360,10 @@ function renderChips(){
   $("#provlist").textContent=""; otros.forEach(s=>{ const o=document.createElement("option"); o.value=s; $("#provlist").appendChild(o); });
 }
 $("#prov").addEventListener("input",e=>{ state.prov=e.target.value.trim(); renderChips(); });
+function renderRecv(){ const box=$("#recv"); box.textContent="";
+  RECIBEN.forEach(n=>{ const b=document.createElement("button"); b.className="chip"; b.textContent=n; b.setAttribute("aria-pressed",String(state.recv===n));
+    b.onclick=()=>{ state.recv=n; store.set("etq_recv",n); renderRecv(); }; box.appendChild(b); }); }
+renderRecv();
 
 /* ---------- productos ---------- */
 const norm = s => String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
@@ -723,6 +731,7 @@ $("#gen").onclick=async()=>{
   const buenas=state.lines.filter(l=>(parseFloat(l.qty)||0)>0 && l.desc.trim());
   const item=l=>({producto:l.desc.trim(), sku:l.sku||"", cajas:parseFloat(l.qty)});
   if(!state.prov){ showMsg(m,"Falta el proveedor. Toca uno de la lista o escríbelo."); return; }
+  if(!state.recv){ showMsg(m,"Falta quién recibió. Toca un nombre en \"Recibido por\"."); $("#recv").scrollIntoView({block:"center"}); return; }
   if(!buenas.length){ showMsg(m,"Falta lo que trae el pallet. Escanea las cajas o escribe el producto y las cajas."); return; }
   // Un grupo por número de pallet, en orden: #1, #2, #5 salen como pallet 1, 2 y 3 de 3.
   const nums=[...new Set(buenas.map(l=>l.pal||1))].sort((a,b)=>a-b);
@@ -731,13 +740,15 @@ $("#gen").onclick=async()=>{
   if(grupos.length>40){ showMsg(m,"Son más de 40 pallets: genera las etiquetas en dos partes."); return; }
   $("#gen").disabled=true; showMsg(m,"Guardando…",true);
   try{
-    const base={proveedor:state.prov, po:$("#po").value.trim(), ubicacion:$("#loc").value.trim()};
+    const base={proveedor:state.prov, po:$("#po").value.trim(), ubicacion:$("#loc").value.trim(), recibido_por:state.recv};
     let j;
     if(grupos.length===1) j=await api("crear",{pallet:Object.assign({items:grupos[0]},base), copias});
     else {
       try{ j=await api("crearLote",Object.assign({pallets:grupos.map(items=>({items}))},base)); }
       catch(e){ if(/Acci[oó]n desconocida/.test(e.message)) throw new Error("para guardar varios pallets distintos hay que actualizar el Apps Script (Implementar > Gestionar implementaciones > editar > Nueva versión)."); throw e; }
     }
+    // Con el Apps Script viejo el nombre no vuelve: la etiqueta lo lleva igual.
+    j.pallets.forEach(p=>{ if(!p.recibido_por) p.recibido_por=state.recv; });
     state.pallets=[...j.pallets.slice().reverse(),...state.pallets];
     const ids=j.pallets.map(p=>p.id);
     showMsg(m, ids.length>1?`Listo: ${ids[0]} a ${ids[ids.length-1]} guardados en el registro.`:`Listo: ${ids[0]} quedó guardado en el registro.`, true);
@@ -762,7 +773,7 @@ function drawLabel(cv,p){
   const n=p.pallet_n||1, lote=p.pallets_lote||1;
   // fila 1: recibido / pallet n de N
   box(M,M,W-2*M,110);
-  lab("RECIBIDO",M+16,M+34); ctx.font=`700 54px ${F}`; ctx.fillText(fmtDate(p.fecha),M+16,M+92);
+  lab("RECIBIDO"+(p.recibido_por?` POR ${String(p.recibido_por).toUpperCase()}`:""),M+16,M+34); ctx.font=`700 54px ${F}`; ctx.fillText(fmtDate(p.fecha),M+16,M+92);
   ctx.textAlign="right";
   if(lote>1){ lab("PALLET",W-M-16,M+34); ctx.font=`800 54px ${F}`; ctx.fillText(`${n} DE ${lote}`,W-M-16,M+92); }
   else { lab("CONVENIENT DISTRIBUTOR",W-M-16,M+34); ctx.font=`600 26px ${F}`; ctx.fillText("Medley, FL",W-M-16,M+70); }
@@ -856,7 +867,7 @@ function renderLog(){
     const id=document.createElement("span"); id.className="id"; id.textContent=p.id;
     const cj=document.createElement("span"); cj.className="cj"; cj.textContent=`${fmtNum(p.total_cajas)} cj`;
     const pv=document.createElement("span"); pv.className="prov"; pv.textContent=p.proveedor+(p.pallets_lote>1?` · pallet ${p.pallet_n} de ${p.pallets_lote}`:"")+(p.po?` · PO ${p.po}`:"");
-    const mt=document.createElement("span"); mt.className="meta"; mt.textContent=`${fmtDate(p.fecha)} · ${(p.items||[]).map(i=>`${fmtNum(i.cajas)} ${i.producto}`).join(", ")}${p.anulado?" · ANULADO":""}`;
+    const mt=document.createElement("span"); mt.className="meta"; mt.textContent=`${fmtDate(p.fecha)}${p.recibido_por?` · recibió ${p.recibido_por}`:""} · ${(p.items||[]).map(i=>`${fmtNum(i.cajas)} ${i.producto}`).join(", ")}${p.anulado?" · ANULADO":""}`;
     b.append(id,cj,pv,mt); b.onclick=()=>abrirConLote(p); box.appendChild(b);
   }
 }
