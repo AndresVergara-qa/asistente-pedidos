@@ -213,7 +213,19 @@ def pick_preferred_model(candidates):
     return preferred
 
 
-def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artificial..."):
+# Tiempo límite por intento. Las llamadas que leen el pedido completo
+# devuelven una línea por producto, así que un pedido de 80 productos
+# no alcanza a terminar en 25s.
+TIMEOUT_PEDIDO_COMPLETO = 150
+TIMEOUT_LOTE = 40
+
+
+def _is_timeout_error(err):
+    s = str(err).lower()
+    return "deadline" in s or "timed out" in s or "timeout" in s
+
+
+def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artificial...", timeout=TIMEOUT_LOTE):
     """
     Intenta los modelos disponibles en orden de prioridad (mejor primero) y
     devuelve (texto_respuesta, nombre_modelo_usado, error).
@@ -236,12 +248,13 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
     ordered = ordered[:5]  # tope de intentos para acotar la espera máxima
 
     attempts = []  # [(model_name, segundos, "ok"/"error: ...")]
+    timeouts = 0
     with st.spinner(spinner_text):
         for i, model_name in enumerate(ordered, start=1):
             t_attempt = time.perf_counter()
             try:
                 model = genai.GenerativeModel(model_name)
-                response = model.generate_content(parts, request_options={"timeout": 25})
+                response = model.generate_content(parts, request_options={"timeout": timeout})
                 if response and response.text:
                     attempts.append((model_name, time.perf_counter() - t_attempt, "ok"))
                     st.session_state["working_model"] = model_name
@@ -253,6 +266,12 @@ def call_gemini(parts, spinner_text="🤖 Conectando con la Inteligencia Artific
             except Exception as err:
                 attempts.append((model_name, time.perf_counter() - t_attempt, f"error: {err}"))
                 last_error = f"{model_name}: {err}"
+                # Un timeout depende del tamaño del pedido, no del modelo: los
+                # demás modelos también se pasarían del tiempo con la misma entrada.
+                if _is_timeout_error(err):
+                    timeouts += 1
+                    if timeouts >= 2:
+                        break
                 continue
     st.session_state["last_gemini_attempts"] = attempts
     return None, None, last_error
@@ -913,7 +932,7 @@ with tab_ventas:
                         ai_input_cache.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
 
                     with st.spinner("🤖 Procesando pedido (catálogo completo, vía caché)..."):
-                        response = cached_model_obj.generate_content(ai_input_cache, request_options={"timeout": 45})
+                        response = cached_model_obj.generate_content(ai_input_cache, request_options={"timeout": TIMEOUT_PEDIDO_COMPLETO})
                     raw_text = response.text
                     items = parse_json_response(raw_text)
                     st.session_state["ventas_raw_response"] = raw_text
@@ -963,7 +982,7 @@ with tab_ventas:
                       ai_input.append(f"TEXTO DEL PEDIDO PROPORCIONADO:\n{pasted_text}")
 
                   t_antes_gemini1 = time.perf_counter()
-                  raw_text, used_model, error = call_gemini(ai_input, spinner_text="🤖 Leyendo el pedido...")
+                  raw_text, used_model, error = call_gemini(ai_input, spinner_text="🤖 Leyendo el pedido...", timeout=TIMEOUT_PEDIDO_COMPLETO)
                   timing["2a_extraccion_ia"] = time.perf_counter() - t_antes_gemini1
                   timing["gemini_intentos_extraccion"] = st.session_state.get("last_gemini_attempts", [])
                   if raw_text is None:
@@ -1327,7 +1346,7 @@ with tab_compras:
                     """
                     image_parts_cache = [Image.open(uploaded_bill)]
                     with st.spinner("📦 Analizando factura (catálogo completo, vía caché)..."):
-                        response_c = cached_model_obj.generate_content([prompt_bill_cache] + image_parts_cache, request_options={"timeout": 45})
+                        response_c = cached_model_obj.generate_content([prompt_bill_cache] + image_parts_cache, request_options={"timeout": TIMEOUT_PEDIDO_COMPLETO})
                     raw_text_compras = response_c.text
                     datos_compras = parse_json_response(raw_text_compras)
                     st.session_state["compras_raw_response"] = raw_text_compras
@@ -1358,7 +1377,7 @@ with tab_compras:
                   image_parts = [Image.open(uploaded_bill)]
                   t_antes_gemini1c = time.perf_counter()
                   raw_text_compras, used_model_compras, error_compras = call_gemini(
-                      [prompt_extraccion_c] + image_parts, spinner_text="📦 Leyendo la factura..."
+                      [prompt_extraccion_c] + image_parts, spinner_text="📦 Leyendo la factura...", timeout=TIMEOUT_PEDIDO_COMPLETO
                   )
                   timing_c["2a_extraccion_ia"] = time.perf_counter() - t_antes_gemini1c
                   timing_c["gemini_intentos_extraccion"] = st.session_state.get("last_gemini_attempts", [])
