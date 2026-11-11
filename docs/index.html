@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Etiquetas de Pallet</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8F%B7%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Una sola columna pensada para el teléfono en una mano: formulario arriba, etiqueta abajo, registro en otra pestaña. */
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --ink:#1b1d1a; --muted:#5d6259; --line:#d6d9d1;
+  --accent:#d9480f; --accent-ink:#ffffff; --accent-soft:#fde8dd; --ok:#2b7a3d; --warn:#9a6700;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#161815; --surface:#20231f; --ink:#ecede8; --muted:#a3a89d; --line:#363a33;
+  --accent:#ff7a3d; --accent-ink:#1b1d1a; --accent-soft:#3a2418; --ok:#6cc47f; --warn:#e3b341; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#161815; --surface:#20231f; --ink:#ecede8; --muted:#a3a89d; --line:#363a33;
+  --accent:#ff7a3d; --accent-ink:#1b1d1a; --accent-soft:#3a2418; --ok:#6cc47f; --warn:#e3b341; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.4}
+.wrap{max-width:560px;margin:0 auto;padding-block:max(12px,env(safe-area-inset-top)) 48px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right));display:flex;flex-direction:column;gap:14px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-weight:800;font-size:30px;letter-spacing:.01em;margin:0;text-transform:uppercase;line-height:1}
+.sub{color:var(--muted);font-size:14px;display:flex;align-items:center;gap:6px;margin-top:4px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block}
+.dot.on{background:var(--ok)} .dot.off{background:var(--accent)}
+.iconbtn{font:600 15px var(--body);padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer}
+.tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px;gap:4px}
+.tabs button{font:600 16px var(--body);padding:10px;border:0;border-radius:7px;background:transparent;color:var(--muted);cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.step{font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+label{font-weight:600;font-size:14px;color:var(--muted)}
+input,select{font:500 17px var(--body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:11px 12px;width:100%;min-width:0}
+input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:600 15px var(--body);padding:9px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.camera{font:700 19px var(--display);letter-spacing:.04em;text-transform:uppercase;padding:15px;border:0;border-radius:10px;background:var(--ink);color:var(--bg);cursor:pointer;width:100%}
+.scanbar{display:grid;grid-template-columns:1fr auto;gap:8px}
+.scanbar input{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.03em}
+.scanbtn{font:600 15px var(--body);padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;white-space:nowrap}
+.scanmsg{font-size:14px;color:var(--muted);min-height:1.2em}
+.scanmsg.ok{color:var(--ok)} .scanmsg.warn{color:var(--warn)}
+.row{display:grid;grid-template-columns:42px 72px 1fr 40px;gap:8px;align-items:start}
+.row .qty{text-align:center;font-family:var(--display);font-weight:700;font-size:20px}
+.row .pal{text-align:center;font-family:var(--display);font-weight:700;font-size:18px;padding-left:2px;padding-right:2px;color:var(--muted)}
+.palbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:8px;background:var(--accent-soft)}
+.palbar b{font-family:var(--display);font-size:20px}
+.palsub{font-size:14px;color:var(--muted);text-align:right}
+.prodwrap{position:relative;min-width:0}
+.sugg{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-height:260px;overflow:auto}
+.sugg button{display:block;width:100%;text-align:left;font:500 15px var(--body);padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.sugg button small{color:var(--muted)}
+.sugg .stock{float:right;color:var(--ok);font-size:13px;margin-left:8px}
+.del{height:46px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted);font-size:20px;cursor:pointer}
+.add{font:600 16px var(--body);padding:11px;border:1px dashed var(--line);border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+.addrow{display:flex;gap:8px}.addrow .add{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
+.add small{font:500 12px var(--body);color:var(--muted)}
+.add.nuevo{border:2px solid var(--accent);background:var(--accent-soft);font-weight:700}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2>div{display:flex;flex-direction:column;gap:6px;min-width:0}
+.big{font:700 20px var(--display);letter-spacing:.04em;text-transform:uppercase;padding:16px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer;width:100%}
+.big:disabled{opacity:.5;cursor:default}
+.ghost{font:600 15px var(--body);padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer}
+.total{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--display);font-weight:700;font-size:20px}
+.msg{font-size:14px;padding:10px 12px;border-radius:8px;background:var(--accent-soft)}
+.msg.ok{background:transparent;border:1px solid var(--ok);color:var(--ok)}
+.preview{display:flex;flex-direction:column;gap:10px;align-items:stretch}
+.preview canvas{width:100%;max-width:360px;align-self:center;height:auto;border:1px solid var(--line);border-radius:4px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px}
+.thumbs button{flex:0 0 auto;padding:0;border:2px solid var(--line);border-radius:4px;background:#fff;cursor:pointer;position:relative}
+.thumbs button[aria-current="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.thumbs img{display:block;width:72px;height:108px}
+.thumbs span{position:absolute;left:0;right:0;bottom:0;font:700 12px var(--display);background:rgba(0,0,0,.65);color:#fff;text-align:center}
+.pagenav{display:flex;justify-content:center;align-items:center;gap:12px;font-family:var(--display);font-weight:700}
+.paper,.btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btns>*{flex:1}
+.list{display:flex;flex-direction:column}
+.item{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:12px 2px;border:0;border-bottom:1px solid var(--line);cursor:pointer;background:transparent;text-align:left;color:var(--ink);font:inherit;width:100%}
+.item .id{font-family:var(--display);font-weight:800;font-size:20px;letter-spacing:.03em}
+.item .prov{font-weight:600;grid-column:1/-1}
+.item .meta{color:var(--muted);font-size:13px;grid-column:1/-1}
+.item .cj{font-family:var(--display);font-weight:700;font-size:18px;text-align:right}
+.void{text-decoration:line-through;opacity:.55}
+.muted{color:var(--muted);font-size:14px}
+.confirm{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* cámara en vivo: hoja a pantalla completa */
+#cam{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
+#cam .vid{position:relative;flex:1;min-height:0}
+#cam video{width:100%;height:100%;object-fit:cover;display:block}
+#cam .guia{position:absolute;left:8%;right:8%;top:50%;border-top:3px solid #ff4b4b;box-shadow:0 0 8px #ff4b4b}
+#cam.ok .guia{border-color:#21c354;box-shadow:0 0 14px #21c354}
+#cam .bar{background:#111;color:#fff;padding:14px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+#cam .estado{font:600 17px var(--body);min-height:1.4em}
+#cam.ok .estado{color:#5fe08a}
+#cam .camtot{font:700 18px var(--display);letter-spacing:.03em;color:#cfd2cb}
+#cam .ultimo{display:flex;align-items:center;gap:10px;background:#183d24;border:1px solid #2f7a45;border-radius:10px;padding:10px 12px;font:600 16px var(--body);color:#c9f5d6}
+#cam .ultimo[hidden]{display:none}
+#cam .ultimo span{flex:1;min-width:0}
+#cam .ultimo button{font:600 14px var(--body);text-transform:none;letter-spacing:0;padding:8px 12px;flex:none}
+#cam .camnota{font:400 13px var(--body);color:#9a9d96}
+#cam .cambtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#cam button.alt{background:transparent;color:#fff;border:1px solid #777}
+#cam button{font:700 19px var(--display);text-transform:uppercase;letter-spacing:.04em;padding:14px;border:0;border-radius:10px;background:#fff;color:#111;cursor:pointer}
+#print{display:none}
+@media print{
+  body>*:not(#print){display:none!important}
+  #print{display:block}
+  #print img{display:block;page-break-after:always;break-after:page;margin:0 auto}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Etiqueta de pallet</h1>
+      <div class="sub"><span class="dot" id="dot"></span><span id="conn">Conectando…</span></div>
+    </div>
+    <button class="iconbtn" id="btn-ajustes" aria-label="Ajustes">⚙️ Ajustes</button>
+  </header>
+
+  <!-- Configuración: link del Apps Script y clave del almacén -->
+  <section id="view-setup" class="card" hidden>
+    <div class="step">Conectar con el Google Sheet</div>
+    <div hidden style="display:flex;flex-direction:column;gap:6px"><label for="cfg-api">Link del Apps Script (termina en /exec)</label><input id="cfg-api" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
+    <div style="display:flex;flex-direction:column;gap:6px"><label for="cfg-clave">Clave del almacén</label><input id="cfg-clave" type="password" autocomplete="off"></div>
+    <button class="big" id="cfg-ok">Conectar</button>
+    <div id="cfg-msg" class="msg" hidden></div>
+  </section>
+
+  <section id="view-ajustes" class="card" hidden>
+    <div class="step">Ajustes</div>
+    <div class="muted" id="aj-prod">Productos: —</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label for="aj-file">Actualizar productos con el inventario de QuickBooks (Excel o CSV)</label>
+      <input id="aj-file" type="file" accept=".xlsx,.xls,.csv">
+    </div>
+    <div id="aj-msg" class="msg" hidden></div>
+    <div class="btns">
+      <button class="ghost" id="aj-recargar">Recargar datos</button>
+      <button class="ghost" id="aj-conexion">Cambiar clave</button>
+    </div>
+    <button class="ghost" id="aj-cerrar">Cerrar ajustes</button>
+  </section>
+
+  <div id="main" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div class="tabs" role="tablist">
+      <button id="tab-new" role="tab" aria-selected="true">Nueva</button>
+      <button id="tab-log" role="tab" aria-selected="false">Registro</button>
+    </div>
+
+    <section id="view-new" style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="step">1 · Proveedor y quién recibe</div>
+        <div class="chips" id="chips"></div>
+        <input id="prov" list="provlist" placeholder="O escribe otro proveedor" autocomplete="off">
+        <datalist id="provlist"></datalist>
+        <label>Recibido por</label>
+        <div class="chips" id="recv"></div>
+      </div>
+
+      <div class="card">
+        <div class="step">2 · Qué trae cada pallet</div>
+        <div class="palbar"><span>Escaneando el <b id="palact">pallet #1</b></span><button class="ghost" id="palnext">+ Siguiente pallet</button></div>
+        <button class="camera" id="cam-cajas">📷 Escanear cajas con la cámara</button>
+        <div class="scanbar">
+          <input id="scan" placeholder="Pistola o código a mano" autocomplete="off" autocapitalize="characters" enterkeyhint="done" aria-label="Código de la caja">
+          <button class="scanbtn" id="scanok">Agregar</button>
+        </div>
+        <div class="scanmsg" id="scanmsg">Cada caja escaneada suma 1. Si son muchas iguales, escanea una y escribe las cajas.</div>
+        <div class="row muted" style="font-size:13px"><span style="text-align:center">Pallet</span><span style="text-align:center">Cajas</span><span>Producto</span><span></span></div>
+        <div id="lines" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div class="addrow"><button class="add" id="addline">+ Otro producto<small id="addline-sub">en el pallet #1</small></button><button class="add nuevo" id="palnext2">+ Nuevo pallet<small id="palnext2-sub">empieza el pallet #2</small></button></div>
+        <div class="total"><span id="totlab">Total cajas del pallet</span><span id="tot">0</span></div>
+        <div class="palsub" id="totpal" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="step">3 · Opcional</div>
+        <div class="grid2">
+          <div><label for="po">PO o factura #</label><input id="po" inputmode="numeric" placeholder="Ej. 1177"></div>
+          <div><label for="loc">Ubicación</label><input id="loc" placeholder="Ej. B02"></div>
+        </div>
+        <div class="grid2" id="copiesrow">
+          <div><label for="copies">Pallets iguales</label><input id="copies" type="number" inputmode="numeric" min="1" max="40" value="1"></div>
+          <div style="justify-content:flex-end"><span class="muted">Cada pallet recibe su propio ID y su etiqueta.</span></div>
+        </div>
+      </div>
+
+      <button class="big" id="gen">Generar etiqueta</button>
+      <div id="genmsg" class="msg" hidden></div>
+    </section>
+
+    <section id="view-log" hidden style="display:flex;flex-direction:column;gap:14px">
+      <button class="camera" id="cam-log">📷 Escanear una etiqueta</button>
+      <input id="q" placeholder="Busca por ID, proveedor, PO o producto" autocomplete="off" enterkeyhint="search" aria-label="Buscar pallet">
+      <div class="scanmsg" id="qmsg"></div>
+      <div class="card" style="padding:4px 14px"><div class="list" id="log"></div></div>
+    </section>
+
+    <section id="out" class="card preview" hidden>
+      <div class="step" id="outtitle">Etiqueta</div>
+      <div class="scanmsg ok" id="lotemsg" hidden></div>
+      <div class="thumbs" id="thumbs" hidden></div>
+      <canvas id="cv" width="812" height="1218"></canvas>
+      <div class="pagenav" id="pagenav" hidden>
+        <button class="ghost" id="prev" aria-label="Anterior">‹</button><span id="pageinfo">1 / 1</span><button class="ghost" id="next" aria-label="Siguiente">›</button>
+      </div>
+      <div class="paper">
+        <span class="muted">Papel:</span>
+        <button class="chip" id="p46" aria-pressed="true">Etiqueta 4x6</button>
+        <button class="chip" id="pletter" aria-pressed="false">Hoja carta</button>
+      </div>
+      <div class="btns">
+        <button class="big" id="print-btn">🖨️ Imprimir</button>
+        <button class="ghost" id="pdf-btn">Descargar PDF</button>
+      </div>
+      <div id="outmsg" class="msg" hidden></div>
+      <div class="confirm" id="voidbox"></div>
+    </section>
+  </div>
+</div>
+
+<div id="cam" hidden>
+  <div class="vid"><video id="video" muted playsinline autoplay></video><div class="guia"></div>
+  </div>
+  <div class="bar">
+    <div class="estado" id="cam-estado">Abriendo cámara…</div>
+    <div class="ultimo" id="cam-ultimo" hidden><span id="cam-ultimo-txt"></span><button id="cam-deshacer" class="alt">Quitar 1</button></div>
+    <div class="camtot" id="cam-tot"></div>
+    <div class="camnota" id="cam-nota">Cada caja se suma sola al leerla. No hace falta tocar nada.</div>
+    <div class="cambtns"><button id="cam-foto" class="alt">No lee: tomar foto</button><button id="cam-close">Cerrar cámara</button></div>
+  </div>
+</div>
+<div id="print"></div>
+<input type="file" id="camfile" accept="image/*" capture="environment" hidden>
+
+<script src="vendor/jsbarcode.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/zxing-wasm-reader.js"></script>
+<script>
+// Link del Apps Script (Implementar > Aplicación web). Si se cambia la implementación, se actualiza aquí o en Ajustes.
+const API_URL = "https://script.google.com/macros/s/AKfycby_od_FO9J6ANdrYphcL94N57sQoV8Yql34Iv9EHvlaPXosR4R-KZ97oYPyf_0ObzHM/exec";
+
+// Proveedores de mercancía de las Bills de QBO (Purchases by Vendor Detail, ene-2024 a nov-2026), por número de Bills.
+// No van E-Florida (es la propia empresa), Uline (suministros), RQS (es cliente) ni los que no compran desde 2024.
+const SUPPLIERS = ["KDP (American Bottling)","BJ's","Gold Coast","Pepsi","Jetro","Sam's Club","Millet","Goya","Eagle Brands","Iberia"];
+const MORE_SUPPLIERS = ["Savys Specialty Foods","US Foods","Guixens Food Group","Snackify 26","Breakthru","Roma Food Group","Costco","Sure Pack","Macna Group","Miami Beverages","Sunshine Bottling","One World Distributors","Laugin Solutions","Sun Wholesale","Ivon USA","Ravi's Wholesale","Trade Food"];
+
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+};
+// El link del Apps Script va fijo (API_URL): cada teléfono solo escribe la clave.
+const cfg = { api: API_URL, clave: store.get("etq_clave") };
+// Quién recibe la mercancía. El teléfono recuerda el último elegido.
+const RECIBEN = ["Darian","Freddy","Jose","Job"];
+const state = { recv:store.get("etq_recv"), prov:"", pal:1, lines:[{qty:"",desc:"",sku:"",pal:1}], pallets:[], current:[], page:0, paper:"4x6", actualizado:"" };
+let INDEX=[], NAMES=new Set(), BYKEY=new Map(), BYSKU=new Map(), BYNUM=new Map(); const CODES=new Map(); let pendingCode=null;
+
+/* ---------- conexión con el Apps Script ---------- */
+async function api(accion, data={}){
+  if(!cfg.api) throw new Error("Falta el link del Apps Script.");
+  let r;
+  try{ r=await fetch(cfg.api,{method:"POST",body:JSON.stringify(Object.assign({accion,clave:cfg.clave},data))}); }
+  catch(e){ setConn(false); throw new Error("Sin conexión. Revisa el internet e intenta otra vez."); }
+  let j; try{ j=await r.json(); }catch(e){ setConn(false); throw new Error("El Apps Script no respondió bien. Revisa que el link termine en /exec y que el acceso sea 'Cualquier persona'."); }
+  setConn(true);
+  if(!j.ok) throw new Error(j.error==="CLAVE"?"La clave no es correcta.":j.error);
+  return j;
+}
+function setConn(on){ $("#dot").className="dot "+(on?"on":"off"); $("#conn").textContent=on?`En línea · ${INDEX.length.toLocaleString("en-US")} productos`:"Sin conexión"; }
+
+function cargarInicio(j){
+  INDEX=[]; NAMES=new Set(); BYKEY=new Map(); BYSKU=new Map(); BYNUM=new Map(); CODES.clear();
+  for(const [n,sku,qoh] of (j.productos||[])) addToIndex(n,sku||"",qoh||0);
+  for(const [code,v] of Object.entries(j.codigos||{})){ CODES.set(code,{name:v.producto,sku:v.sku||""}); addToIndex(v.producto,v.sku||"",0); }
+  state.pallets=j.pallets||[]; state.actualizado=j.actualizado||"";
+  $("#aj-prod").textContent = INDEX.length ? `Productos: ${INDEX.length.toLocaleString("en-US")}${state.actualizado?`, actualizados el ${state.actualizado}`:""}.` : "Todavía no hay productos: sube el inventario de QuickBooks aquí abajo.";
+  setConn(true); renderChips(); renderLog();
+}
+async function arrancar(){
+  try{ cargarInicio(await api("inicio")); mostrar("main"); if(!INDEX.length) mostrar("ajustes"); }
+  catch(e){ mostrar("setup"); showMsg($("#cfg-msg"),e.message); }
+}
+function mostrar(v){
+  $("#view-setup").hidden = v!=="setup"; $("#view-ajustes").hidden = v!=="ajustes";
+  $("#main").hidden = v==="setup"; $("#main").style.display = v==="setup"?"none":"flex";
+}
+$("#cfg-ok").onclick=async()=>{
+  cfg.api=$("#cfg-api").value.trim()||API_URL; cfg.clave=$("#cfg-clave").value;
+  const m=$("#cfg-msg"); m.hidden=true; $("#cfg-ok").disabled=true;
+  try{ const j=await api("inicio"); store.set("etq_clave",cfg.clave); cargarInicio(j); mostrar("main"); if(!INDEX.length) mostrar("ajustes"); }
+  catch(e){ showMsg(m,e.message); }
+  finally{ $("#cfg-ok").disabled=false; }
+};
+$("#btn-ajustes").onclick=()=>{ if(!$("#view-setup").hidden) return; mostrar($("#view-ajustes").hidden?"ajustes":"main"); };
+$("#aj-cerrar").onclick=()=>mostrar("main");
+$("#aj-conexion").onclick=()=>{ $("#cfg-api").value=cfg.api; $("#cfg-clave").value=cfg.clave; mostrar("setup"); };
+$("#aj-recargar").onclick=async()=>{ const m=$("#aj-msg"); try{ cargarInicio(await api("inicio")); showMsg(m,"Datos al día.",true); }catch(e){ showMsg(m,e.message); } };
+
+/* ---------- inventario de QuickBooks (Ajustes) ---------- */
+const PROD_COLS=["PRODUCT/SERVICE","NAME","PRODUCT/SERVICE NAME","PRODUCT","PRODUCTO","NOMBRE","ITEM","ITEM NAME","ARTICULO","ARTÍCULO"];
+const SKU_COLS=["SKU","ITEM SKU","CÓDIGO","CODIGO"];
+const QOH_COLS=["QUANTITY ON HAND","QTY ON HAND","QTY. ON HAND","QUANTITY","QTY","QOH","CANTIDAD"];
+let xlsxCargado=null;
+function cargarXLSX(){ if(window.XLSX) return Promise.resolve(); if(!xlsxCargado) xlsxCargado=new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="vendor/xlsx.full.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); return xlsxCargado; }
+function celdaTexto(v){ if(v===null||v===undefined) return ""; if(typeof v==="number") return Number.isInteger(v)?String(v):String(v); return String(v).trim(); }
+$("#aj-file").addEventListener("change",async e=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return; const m=$("#aj-msg"); showMsg(m,"Leyendo el archivo…",true);
+  try{
+    await cargarXLSX();
+    // En CSV se lee todo como texto, para que los SKU no pierdan los ceros de adelante.
+    const wb=XLSX.read(await f.arrayBuffer(),{type:"array",raw:/\.csv$/i.test(f.name)});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:""});
+    // QuickBooks a veces pone títulos arriba: se busca la fila que tiene el nombre del producto.
+    let h=-1, ip=-1;
+    for(let i=0;i<Math.min(rows.length,15)&&h<0;i++){ const up=rows[i].map(c=>String(c).trim().toUpperCase()); const k=PROD_COLS.find(c=>up.includes(c)); if(k){ h=i; ip=up.indexOf(k); } }
+    if(h<0) throw new Error("No encontré la columna del nombre del producto (Product/Service o Name).");
+    const up=rows[h].map(c=>String(c).trim().toUpperCase()); const col=list=>{ const k=list.find(c=>up.includes(c)); return k?up.indexOf(k):-1; };
+    const isku=col(SKU_COLS), iq=col(QOH_COLS), it=col(["TYPE","ITEM TYPE","TIPO"]);
+    const prods=[];
+    for(const r of rows.slice(h+1)){
+      const n=celdaTexto(r[ip]); if(!n) continue;
+      if(it>=0 && /service|servicio|bundle|group|category|categor/i.test(String(r[it]))) continue;
+      prods.push([n, isku>=0?celdaTexto(r[isku]):"", iq>=0?(Number(String(r[iq]).replace(/,/g,""))||0):0]);
+    }
+    if(!prods.length) throw new Error("El archivo no trae productos.");
+    const datos=rows.length-h-1;
+    showMsg(m,`Subiendo ${prods.length.toLocaleString("en-US")} productos…`,true);
+    const j=await api("productos",{productos:prods});
+    cargarInicio(await api("inicio"));
+    showMsg(m,`Listo: ${j.productos.toLocaleString("en-US")} productos guardados.`+(datos===2000?" Ojo: el archivo trae justo 2,000 filas, puede que QuickBooks lo haya cortado. Expórtalo completo.":""),true);
+  }catch(err){ showMsg(m,err.message||"No pude leer el archivo."); }
+  finally{ e.target.value=""; }
+});
+
+/* ---------- proveedor ---------- */
+function renderChips(){
+  const recientes=[...new Set(state.pallets.map(p=>p.proveedor).filter(Boolean))].slice(0,4);
+  const lista=[...new Set([...recientes,...SUPPLIERS])];
+  const box=$("#chips"); box.textContent="";
+  lista.forEach(s=>{ const b=document.createElement("button"); b.className="chip"; b.textContent=s; b.setAttribute("aria-pressed",String(state.prov===s));
+    b.onclick=()=>{ state.prov=s; $("#prov").value=""; renderChips(); }; box.appendChild(b); });
+  const otros=[...new Set([...MORE_SUPPLIERS,...state.pallets.map(p=>p.proveedor).filter(Boolean)])].filter(s=>!lista.includes(s));
+  $("#provlist").textContent=""; otros.forEach(s=>{ const o=document.createElement("option"); o.value=s; $("#provlist").appendChild(o); });
+}
+$("#prov").addEventListener("input",e=>{ state.prov=e.target.value.trim(); renderChips(); });
+function renderRecv(){ const box=$("#recv"); box.textContent="";
+  RECIBEN.forEach(n=>{ const b=document.createElement("button"); b.className="chip"; b.textContent=n; b.setAttribute("aria-pressed",String(state.recv===n));
+    b.onclick=()=>{ state.recv=n; store.set("etq_recv",n); renderRecv(); }; box.appendChild(b); }); }
+renderRecv();
+
+/* ---------- productos ---------- */
+const norm = s => String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+const digits = s => String(s).replace(/\D/g,"");
+// Clave de un código: solo dígitos si es numérico (UPC/EAN/ITF); si trae letras (Code 128, como los
+// X00… de Amazon), letras y números en mayúscula.
+function codeKey(raw){ const s=String(raw||"").trim().toUpperCase(); return /[A-Z]/.test(s) ? s.replace(/[^A-Z0-9]/g,"") : digits(s); }
+// Los 11 dígitos de producto de un UPC, venga como UPC-A, EAN-13 con 0 delante o el GTIN-14 de la caja.
+function key11(d){ if(!d||d.length<8) return null; if(d.length<=12) return d.padStart(12,"0").slice(0,11);
+  if(d.length===13) return d[0]==="0"?d.slice(1,12):null; if(d.length===14) return d.slice(2,13); return null; }
+function addToIndex(n,sku,qoh){
+  if(!n||NAMES.has(n)) return; NAMES.add(n);
+  const p={n,sku,qoh:qoh||0,key:norm(n+" "+sku),nn:norm(n)}; INDEX.push(p);
+  const ks=codeKey(sku); if(/[A-Z]/.test(ks) && ks.length>=4 && !BYSKU.has(ks)) BYSKU.set(ks,p);
+  const d=digits(sku); if(d.length>=11&&d.length<=14&&d===String(sku).replace(/[\s-]/g,"")){ const k=key11(d); if(k){ if(!BYKEY.has(k)) BYKEY.set(k,[]); BYKEY.get(k).push(p); } }
+  // El número exacto (sin ceros a la izquierda): para EAN-13 que no empiezan en 0, como los de China o
+  // Venezuela, que key11 no cubre.
+  if(d.length>=8&&d===String(sku).replace(/[\s-]/g,"")){ const n=d.replace(/^0+/,""); if(!BYNUM.has(n)) BYNUM.set(n,p);
+    const c=cuerpoGtin(d); if(c&&!BYNUM.has("c"+c)) BYNUM.set("c"+c,p); }
+}
+// GTIN (EAN-8, UPC-A, EAN-13, GTIN-14) con su dígito de control bien: el número sin ese dígito, sin el
+// primer dígito del GTIN-14 (el que dice si es caja o unidad) y sin ceros a la izquierda.
+function gtinOk(d){ if(![8,12,13,14].includes(d.length)) return false; let t=0;
+  for(let i=d.length-2,k=3;i>=0;i--,k=k===3?1:3) t+=Number(d[i])*k; return (10-t%10)%10===Number(d[d.length-1]); }
+function cuerpoGtin(d){ if(!gtinOk(d)) return null; const b=d.padStart(14,"0").slice(1,13).replace(/^0+/,""); return b||null; }
+function recentUse(){ const m=new Map(); for(const p of state.pallets.slice(0,300)) for(const it of (p.items||[])) m.set(it.producto,(m.get(it.producto)||0)+1); return m; }
+function search(q){
+  const nq=norm(q).trim(); const words=nq.split(/\s+/).filter(Boolean); if(!words.length) return [];
+  const used=recentUse(); const hits=[];
+  for(const p of INDEX){ if(!words.every(w=>p.key.includes(w))) continue;
+    let sc=0; if(p.nn===nq) sc+=1e7; if(p.nn.startsWith(nq)) sc+=1e5;
+    sc+=(used.get(p.n)||0)*1e4; if(p.qoh>0) sc+=1e3+Math.min(p.qoh,9999)/10;
+    hits.push([sc,p]); }
+  hits.sort((a,b)=>b[0]-a[0]||a[1].n.localeCompare(b[1].n));
+  return hits.slice(0,12).map(h=>h[1]);
+}
+function renderLines(){
+  const box=$("#lines"); box.textContent="";
+  state.lines.forEach((ln,i)=>{
+    const row=document.createElement("div"); row.className="row";
+    const pl=document.createElement("input"); pl.className="pal"; pl.type="number"; pl.inputMode="numeric"; pl.min="1"; pl.value=ln.pal||1; pl.id="pal"+i; pl.setAttribute("aria-label","Número de pallet");
+    // Cambiar el # a mano también mueve el pallet actual: lo que se escanee o agregue después va a ese.
+    pl.oninput=()=>{ if(pl.value==="") return; ln.pal=Math.max(1,parseInt(pl.value,10)||1); state.pal=ln.pal; updTotal(); setScanMsg($("#scanmsg"),"",""); };
+    pl.onblur=()=>{ if(pl.value==="") pl.value=ln.pal||1; };
+    const q=document.createElement("input"); q.className="qty"; q.type="number"; q.inputMode="numeric"; q.min="0"; q.placeholder="0"; q.value=ln.qty; q.id="qty"+i; q.setAttribute("aria-label","Cajas");
+    q.oninput=()=>{ ln.qty=q.value; updTotal(); };
+    const wrap=document.createElement("div"); wrap.className="prodwrap";
+    const d=document.createElement("input"); d.placeholder="Busca o escribe el producto"; d.value=ln.desc; d.id="desc"+i; d.autocomplete="off"; d.setAttribute("aria-label","Producto");
+    const sg=document.createElement("div"); sg.className="sugg"; sg.hidden=true;
+    d.oninput=()=>{ ln.desc=d.value; ln.sku=""; const r=search(d.value);
+      sg.textContent=""; r.forEach(({n,sku,qoh})=>{ const b=document.createElement("button"); b.type="button";
+        if(qoh>0){ const st=document.createElement("span"); st.className="stock"; st.textContent=qoh.toLocaleString("en-US")+" en inventario"; b.append(st); }
+        b.append(n); if(sku){ const sm=document.createElement("small"); sm.textContent="  · "+sku; b.append(sm); }
+        b.onmousedown=e=>e.preventDefault();
+        b.onclick=()=>{ ln.desc=n; ln.sku=sku; d.value=n; sg.hidden=true; if(ln.codigo){ const c=ln.codigo; ln.codigo=""; aprender(c,n,sku,"almacén"); } else learnPending(n,sku); };
+        sg.appendChild(b); });
+      sg.hidden=!r.length; };
+    d.onblur=()=>setTimeout(()=>sg.hidden=true,150);
+    wrap.append(d,sg);
+    const x=document.createElement("button"); x.className="del"; x.textContent="×"; x.setAttribute("aria-label","Quitar producto");
+    x.onclick=()=>{ state.lines.splice(i,1); if(!state.lines.length) state.lines.push(lineaNueva()); renderLines(); updTotal(); };
+    row.append(pl,q,wrap,x); box.appendChild(row);
+  });
+}
+function totalCajas(pal){ return state.lines.reduce((a,l)=>a+((pal==null||(l.pal||1)===pal)?(parseFloat(l.qty)||0):0),0); }
+// Cada renglón lleva su número de pallet. Lo que se escanea va al pallet actual; "Siguiente pallet" empieza
+// otro. Al generar sale una etiqueta por pallet, cada una con lo suyo (pallet 1 de N, 2 de N...).
+function lineaNueva(extra){ return Object.assign({qty:"",desc:"",sku:"",pal:state.pal},extra||{}); }
+function palletsUsados(){ return [...new Set(state.lines.filter(l=>l.desc.trim()||(parseFloat(l.qty)||0)>0).map(l=>l.pal||1))].sort((a,b)=>a-b); }
+function updTotal(){
+  const usados=palletsUsados(), varios=usados.length>1;
+  $("#tot").textContent = totalCajas().toLocaleString("en-US");
+  $("#totlab").textContent = varios?`Total cajas (${usados.length} pallets)`:"Total cajas del pallet";
+  $("#totpal").hidden=!varios; $("#totpal").textContent=usados.map(n=>`#${n}: ${fmtNum(totalCajas(n))}`).join(" · ");
+  // "Pallets iguales" es para un solo contenido repetido; con varios pallets distintos no aplica.
+  $("#copiesrow").hidden=varios; if(varios) $("#copies").value="1";
+  $("#palact").textContent=`pallet #${state.pal}`;
+  const ult=state.lines[state.lines.length-1], palUlt=ult?(ult.pal||1):state.pal;
+  const vacio=!state.lines.some(l=>(l.pal||1)===state.pal&&(l.desc.trim()||(parseFloat(l.qty)||0)>0));
+  $("#addline-sub").textContent=`en el pallet #${palUlt}`;
+  $("#palnext2-sub").textContent=vacio?`el #${state.pal} está vacío`:`empieza el pallet #${Math.max(state.pal,...state.lines.map(l=>l.pal||1))+1}`;
+  $("#gen").textContent= varios?`Generar ${usados.length} etiquetas`:"Generar etiqueta";
+}
+// "+ Otro producto" sigue en el pallet del último renglón; para empezar otro pallet está "Siguiente pallet".
+$("#addline").onclick=()=>{ const last=state.lines[state.lines.length-1]; if(last) state.pal=last.pal||1;
+  state.lines.push(lineaNueva()); renderLines(); updTotal(); setScanMsg($("#scanmsg"),"",""); $("#qty"+(state.lines.length-1)).focus(); };
+$("#palnext2").onclick=()=>{ $("#palnext").onclick(); $("#qty"+(state.lines.length-1)).focus(); };
+$("#palnext").onclick=()=>{
+  const max=Math.max(state.pal,...state.lines.map(l=>l.pal||1));
+  const actualVacio=!state.lines.some(l=>(l.pal||1)===state.pal&&(l.desc.trim()||(parseFloat(l.qty)||0)>0));
+  if(!actualVacio) state.pal=max+1;
+  const last=state.lines[state.lines.length-1];
+  if(last&&!last.desc&&!last.qty) last.pal=state.pal; else state.lines.push(lineaNueva());
+  renderLines(); updTotal();
+  setScanMsg($("#scanmsg"),actualVacio?`El pallet #${state.pal} todavía está vacío: escanea sus cajas.`:`Ahora vas con el pallet #${state.pal}. Escanea sus cajas.`,"ok");
+};
+
+/* ---------- escaneo de cajas ---------- */
+function lookup(raw){ const d=codeKey(raw); if(CODES.has(d)) return CODES.get(d);
+  if(BYSKU.has(d)){ const p=BYSKU.get(d); return {name:p.n,sku:p.sku}; }
+  const k=/^\d+$/.test(d)&&key11(d); const list=k&&BYKEY.get(k); if(list&&list.length){ const best=[...list].sort((a,b)=>b.qoh-a.qoh)[0]; return {name:best.n,sku:best.sku}; }
+  if(/^\d+$/.test(d)){
+    // Mismo número; el EAN-13 sin su último dígito (el de control); o el EAN-13 que va dentro de un GTIN-14.
+    const prueba=[d]; if(d.length===13) prueba.push(d.slice(0,12)); if(d.length===14) prueba.push(d.slice(1),d.slice(1,13));
+    for(const x of prueba){ const p=BYNUM.get(x.replace(/^0+/,"")); if(p) return {name:p.n,sku:p.sku}; }
+    const c=cuerpoGtin(d), p=c&&BYNUM.get("c"+c); if(p) return {name:p.n,sku:p.sku};
+  }
+  return null; }
+function setScanMsg(el,t,cls){ el.textContent=t; el.className="scanmsg"+(cls?" "+cls:""); }
+function addProduct(name,sku){
+  let i=state.lines.findIndex(l=>l.desc===name&&(l.pal||1)===state.pal);
+  if(i>=0){ state.lines[i].qty=String((parseFloat(state.lines[i].qty)||0)+1); }
+  else { const last=state.lines[state.lines.length-1]; if(last&&!last.desc&&!last.qty){ last.desc=name; last.sku=sku; last.qty="1"; last.pal=state.pal; i=state.lines.length-1; } else { state.lines.push(lineaNueva({qty:"1",desc:name,sku})); i=state.lines.length-1; } }
+  renderLines(); updTotal(); return i;
+}
+// Devuelve el texto para mostrar, y si el código no se conoce deja el renglón listo para elegir el producto.
+function handleScan(raw){
+  raw=String(raw||"").trim(); if(!raw) return null; const msg=$("#scanmsg");
+  if(/^CD-\d{6}-/i.test(raw)){ cerrarCamara(); openById(raw.toUpperCase()); return null; }
+  const d=codeKey(raw); if(d.length<(/^\d+$/.test(d)?6:4)){ setScanMsg(msg,`El código ${raw} no parece de una caja. Intenta otra vez.`,"warn"); return null; }
+  const hit=lookup(d);
+  if(hit){ const i=addProduct(hit.name,hit.sku); pendingCode=null; ultimoAgregado=hit.name; const t=`+1 ${hit.name} (van ${state.lines[i].qty} en el pallet #${state.pal})`; setScanMsg(msg,t,"ok"); return t; }
+  // No está en el inventario: la caja se cuenta igual y el nombre se busca en internet, sin que el
+  // del almacén tenga que hacer nada. Si no aparece, queda "SIN IDENTIFICAR" y se corrige en la oficina.
+  const w=WEB.get(d); const nombre=w&&w.name||sinIdentificar(d);
+  const i=addProduct(nombre,w&&w.sku||""); state.lines[i].codigo=w&&w.sku?"":d; pendingCode=null; ultimoAgregado=nombre;
+  if(!w) buscarEnInternet(d);
+  const t=w&&w.name?`UPC no encontrado en inventario: ${w.web||w.name} (van ${state.lines[i].qty} en el pallet #${state.pal})`
+    :`UPC ${d} no encontrado en inventario. Contada igual; buscando el nombre… (van ${state.lines[i].qty})`;
+  setScanMsg(msg,t,"warn"); return t;
+}
+const WEB=new Map(); // código -> {name, sku, web} de lo que se buscó en internet en esta sesión
+function sinIdentificar(d){ return `SIN IDENTIFICAR · ${d}`; }
+async function buscarEnInternet(d){
+  WEB.set(d,{name:"",sku:""}); let j;
+  try{ j=await api("buscarUpc",{codigo:d}); }
+  catch(e){ WEB.delete(d); if(/Acci[oó]n desconocida/.test(e.message)) avisoUpc(`UPC ${d} no encontrado en inventario. Para buscarlo en internet hay que actualizar el Apps Script.`); return; }
+  const web=String(j.nombre||"").trim();
+  if(!web){ avisoUpc(`UPC ${d} no encontrado en inventario ni en internet: queda como SIN IDENTIFICAR para corregirlo en la oficina.`); return; }
+  const m=parecido(web,d); const name=m?m.n:web.toUpperCase(), sku=m?m.sku:"";
+  WEB.set(d,{name,sku,web});
+  // Los renglones que ya se contaron con este código toman el nombre (y se juntan si ya había uno igual).
+  for(const ln of [...state.lines]){ if(ln.codigo!==d) continue;
+    const otro=state.lines.find(x=>x!==ln&&x.desc===name&&(x.pal||1)===(ln.pal||1));
+    if(otro){ otro.qty=String((parseFloat(otro.qty)||0)+(parseFloat(ln.qty)||0)); state.lines.splice(state.lines.indexOf(ln),1); }
+    else { ln.desc=name; ln.sku=sku; if(m) ln.codigo=""; } }
+  if(ultimaSuma===sinIdentificar(d)) ultimaSuma=name;
+  renderLines(); updTotal(); if(camActiva) camTotal();
+  avisoUpc(`UPC no encontrado en inventario: ${web}`+(m?` → en QB es ${m.n}`:""));
+  if(m) aprender(d,m.n,m.sku,"internet");
+}
+function avisoUpc(t){ setScanMsg($("#scanmsg"),t,"warn"); if(camActiva){ $("#cam-ultimo").hidden=false; $("#cam-ultimo-txt").textContent=t; } }
+async function aprender(code,name,sku,fuente){
+  CODES.set(code,{name,sku}); addToIndex(name,sku,0);
+  try{ await api("codigo",{codigo:code,producto:name,sku,fuente}); }catch(e){}
+}
+// ¿El nombre que dio internet es uno de los productos de QB? Solo si dicen lo mismo: todas las palabras
+// del nombre de QB están en el de internet y al revés (sin contar palabras genéricas como SODA o PACK),
+// y el tamaño no choca. Así "Dr Pepper Soda 12 pack" no se confunde con Dr Pepper Diet o Cherry. Si hay
+// más de un producto que cumple, no se elige ninguno y la etiqueta lleva el nombre de internet.
+const NO_CUENTA=new Set(["CAN","CANS","LATA","LATAS","PACK","PK","PACKS","OZ","FL","X","THE","OF","AND","DE","Y","BOTTLE","BOTTLES","BTL","CT","COUNT","EA","UNIT","UNITS","ML","L","LB","NET","WT","SODA","SOFT","DRINK","DRINKS","BEVERAGE","CARBONATED","ORIGINAL","REGULAR","CLASSIC","FLAVORED","FLAVOR","CASE","CAJA","IN","WITH","A"]);
+function palabras(t){ const w=norm(String(t).replace(/(\d)([a-z])/gi,"$1 $2").replace(/([a-z])(\d)/gi,"$1 $2")).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  return { w:new Set(w.filter(x=>!/^\d+$/.test(x)&&!NO_CUENTA.has(x))), n:new Set(w.filter(x=>/^\d+$/.test(x))) }; }
+function parecido(web,d){
+  const A=palabras(web); if(A.w.size<2) return null; const hits=[];
+  for(const p of INDEX){ const B=palabras(p.n); if(!B.w.size||B.w.size!==A.w.size) continue;
+    let igual=true; for(const x of B.w) if(!A.w.has(x)){ igual=false; break; } if(!igual) continue;
+    if(A.n.size&&B.n.size&&![...B.n].some(x=>A.n.has(x))) continue;
+    hits.push(p); }
+  return hits.length===1?hits[0]:null;
+}
+async function learnPending(name,sku){
+  if(!pendingCode) return; const code=pendingCode; pendingCode=null;
+  CODES.set(code,{name,sku}); setScanMsg($("#scanmsg"),`Listo: el código ${code} queda guardado como ${name}.`,"ok");
+  try{ await api("codigo",{codigo:code,producto:name,sku}); }catch(e){ setScanMsg($("#scanmsg"),`El producto quedó en el pallet, pero no pude guardar el código: ${e.message}`,"warn"); }
+}
+$("#scan").addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key==="Tab"){ e.preventDefault(); handleScan(e.target.value); e.target.value=""; } });
+$("#scanok").onclick=()=>{ const v=$("#scan").value.trim();
+  if(!v){ setScanMsg($("#scanmsg"),"Escribe el código aquí o usa el botón de la cámara.","warn"); $("#scan").focus(); return; }
+  handleScan(v); $("#scan").value=""; };
+
+/* ---------- cámara en vivo ---------- */
+// Lee códigos continuamente, como una pistola: BarcodeDetector en Android, ZXing en iPhone.
+// El mismo código solo vuelve a contar cuando salió de la cámara, para no sumar la misma caja varias veces.
+// HUECO_MS: cuánto tiempo sin ver el código cuenta como "salió de la cámara". Es más largo que el paso del
+// lector más lento (zxing, cada 500 ms y alternando zonas), para que una caja quieta no se sume dos veces.
+const ESPERA_MS=1200, HUECO_MS=1700;
+let camStream=null, camActiva=false, camModo="cajas", pausaHasta=0, ultimoCodigo=null, ultimaVista=0;
+// Un código cuenta solo si se lee igual dos veces seguidas (tres si es corto, de 8 dígitos o menos):
+// así una lectura equivocada suelta no se cuela como si fuera una caja.
+let candCodigo=null, candVeces=0, candHora=0;
+function leidoCamara(code){
+  const ahora=Date.now(); code=String(code||"").trim(); if(!code) return;
+  if(code===candCodigo && ahora-candHora<1500) candVeces++; else { candCodigo=code; candVeces=1; }
+  candHora=ahora;
+  if(candVeces<(/^\d{1,8}$/.test(code)?3:2)) return;
+  if(!camActiva || (ahora<pausaHasta && code!==ultimoCodigo)) return;
+  const misma=code===ultimoCodigo && ahora-ultimaVista<HUECO_MS; ultimoCodigo=code; ultimaVista=ahora;
+  if(misma || ahora<pausaHasta) return;
+  pausaHasta=ahora+ESPERA_MS;
+  if(navigator.vibrate) navigator.vibrate(120);
+  if(camModo==="log"){ cerrarCamara(); $("#q").value=code; findPallet(code); return; }
+  ultimoAgregado=null; const t=handleScan(code); if(!camActiva) return;
+  if(ultimoAgregado){ pitido(); ultimaSuma=ultimoAgregado; } $("#cam-deshacer").hidden=!ultimaSuma;
+  // Lo último que se sumó queda fijo en pantalla hasta la siguiente caja: ya está en el pallet.
+  $("#cam-ultimo").hidden=!t; if(t) $("#cam-ultimo-txt").textContent="✓ "+t.replace(/^\+1 /,"Sumada: ");
+  $("#cam").classList.add("ok"); $("#cam-estado").textContent="Apunta al código de la siguiente caja";
+  camTotal();
+  setTimeout(()=>{ $("#cam").classList.remove("ok"); },ESPERA_MS);
+}
+let ultimaSuma=null, ultimoAgregado=null, audio=null;
+function camTotal(){ $("#cam-tot").textContent=`Pallet #${state.pal}: ${fmtNum(totalCajas(state.pal))} cajas`+(palletsUsados().length>1?` · en total ${fmtNum(totalCajas())}`:""); }
+function pitido(){
+  try{ if(!audio) return; const o=audio.createOscillator(), g=audio.createGain(); o.frequency.value=1250; g.gain.value=0.15;
+    o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime+0.09); }catch(e){}
+}
+$("#cam-deshacer").onclick=()=>{
+  const i=state.lines.findIndex(l=>l.desc===ultimaSuma&&(l.pal||1)===state.pal); if(i<0){ $("#cam-ultimo").hidden=true; return; }
+  const q=(parseFloat(state.lines[i].qty)||0)-1;
+  if(q>0) state.lines[i].qty=String(q); else { state.lines.splice(i,1); if(!state.lines.length) state.lines.push(lineaNueva()); }
+  renderLines(); updTotal(); camTotal();
+  $("#cam-ultimo-txt").textContent=`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`;
+  setScanMsg($("#scanmsg"),`Quité 1 de ${ultimaSuma} (quedan ${Math.max(q,0)})`,"ok");
+  if(q<=0){ ultimaSuma=null; $("#cam-deshacer").hidden=true; }
+};
+async function loopNativo(det){ const v=$("#video");
+  // El lector del teléfono lee directo del video (así fue como leyó la regla).
+  while(camActiva){ try{ if(v.readyState>=2&&v.videoWidth){ const c=await det.detect(v);
+      const ok=c.find(x=>x.format!=="itf"||/^\d{14}$/.test(x.rawValue)); if(ok) leidoCamara(ok.rawValue); } }catch(e){}
+    await new Promise(r=>setTimeout(r,180)); } }
+// Lector de códigos: zxing-cpp compilado a WebAssembly (lee mucho mejor que la versión JavaScript,
+// sobre todo códigos pequeños o borrosos). El .wasm va en vendor/, junto a la página.
+// Solo los tipos de código que traen las cajas: con todos los tipos lineales, las rayas de una mesa o
+// de un plástico a veces salían como un código que no existe.
+const LEER={tryHarder:true,formats:["EAN13","EAN8","UPCA","UPCE","ITF14","Code128","Code39"],maxNumberOfSymbols:1};
+let wasmListo=null;
+function prepararLector(){
+  if(!wasmListo) wasmListo=ZXingWASM.prepareZXingModule({
+    overrides:{locateFile:(path,prefix)=>path.endsWith(".wasm")?new URL("vendor/"+path,location.href).href:prefix+path},
+    fireImmediately:true});
+  return wasmListo;
+}
+async function leerImagen(imgData){ const r=await ZXingWASM.readBarcodes(imgData,LEER); const ok=r.find(x=>x.text); return ok?ok.text:null; }
+// En vivo se lee en un Worker (segundo plano) para que el video no se trabe: el cuadro sale del video
+// con createImageBitmap y el Worker lo recorta y lo lee. Si el teléfono no puede, se hace aquí mismo.
+let lector=null, lectorN=0, conBitmap=typeof createImageBitmap==="function"; const lectorPend=new Map();
+function sinLector(){ lector=false; lectorPend.forEach(f=>f({text:null})); lectorPend.clear(); }
+function alLector(msg,transfer){
+  if(lector===null){
+    try{ lector=new Worker("lector-worker.js"); lector.postMessage({opciones:LEER});
+      lector.onmessage=e=>{ const f=lectorPend.get(e.data.id); if(f){ lectorPend.delete(e.data.id); f(e.data); } };
+      lector.onerror=sinLector;
+    }catch(e){ lector=false; }
+  }
+  if(lector===false) return null;
+  return new Promise(res=>{ const id=++lectorN; lectorPend.set(id,res); lector.postMessage(Object.assign({id},msg),transfer); });
+}
+const cvVivo=document.createElement("canvas"), ctxVivo=cvVivo.getContext("2d",{willReadFrequently:true});
+// modo: "franja" (la franja de la línea, a lo ancho), "centro" (solo el medio de esa franja, para un
+// código pequeño que ocupa poco del ancho) o "todo" (el cuadro entero reducido, para códigos grandes o torcidos).
+function zona(modo,vw,vh){
+  if(modo==="todo") return [0,0,vw,vh];
+  const bh=Math.round(vh*0.6), y=Math.round((vh-bh)/2);
+  if(modo==="centro"){ const w=Math.round(vw*0.6); return [Math.round((vw-w)/2),y,w,bh]; }
+  return [0,y,vw,bh];
+}
+async function leerCuadro(v,modo){
+  const vw=v.videoWidth, vh=v.videoHeight;
+  let bmp=null;
+  if(conBitmap&&lector!==false){ try{ bmp=await createImageBitmap(v); }catch(e){ conBitmap=false; } }
+  if(bmp){
+    const r=await alLector({bmp,zona:zona(modo,bmp.width,bmp.height),escala:modo==="todo"},[bmp]);
+    // sinCanvas: el teléfono no tiene OffscreenCanvas; vacio: el cuadro llegó transparente (pasa en
+    // algunos Android). En los dos casos se sigue recortando aquí.
+    if(r&&!r.sinCanvas&&!r.vacio) return r.text;
+    if(r&&(r.sinCanvas||r.vacio)) conBitmap=false; else return null;
+  }
+  // Sin Worker o sin OffscreenCanvas: se recorta aquí (más lento).
+  const [x,y,w,h]=zona(modo,vw,vh), k=modo==="todo"?Math.min(1,1280/vw):1;
+  cvVivo.width=Math.round(w*k); cvVivo.height=Math.round(h*k); ctxVivo.drawImage(v,x,y,w,h,0,0,cvVivo.width,cvVivo.height);
+  const img=ctxVivo.getImageData(0,0,cvVivo.width,cvVivo.height);
+  const r=await alLector({img},[img.data.buffer]); if(r) return r.text;
+  await prepararLector(); return leerImagen(img);
+}
+async function loopWasm(conNativo){
+  const v=$("#video");
+  // Con el lector propio del teléfono (Android) este va despacio y solo mira alrededor de la línea:
+  // es de apoyo, y cada cuadro que se saca del video a 4K cuesta. Sin él (iPhone) mira también el cuadro entero.
+  const cada=conNativo?350:150, modos=["franja","centro","todo"];
+  let vuelta=0;
+  while(camActiva){
+    if(v.readyState>=2&&v.videoWidth){ try{ const t=await leerCuadro(v,modos[vuelta++%modos.length]); if(t) leidoCamara(t); }catch(e){} }
+    await new Promise(r=>setTimeout(r,cada));
+  }
+}
+// La foto lee porque sale a 12 MP con buen enfoque; el video en vivo, a menos. Se pide 1440p: con 1080p
+// no leía la regla de Amazon y con 4K la cámara tardaba en abrir y en leer. Andrés pidió quitar el zoom, la luz y los botones de arriba (le daban lag).
+function camTrack(){ return camStream?camStream.getVideoTracks()[0]:null; }
+async function iniciarStream(deviceId){
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  const res={width:{ideal:2560},height:{ideal:1440}};
+  // Si antes se eligió otra cámara trasera, se sigue usando esa.
+  const video=deviceId?Object.assign({deviceId:{exact:deviceId}},res):Object.assign({facingMode:{ideal:"environment"}},res);
+  try{ camStream=await navigator.mediaDevices.getUserMedia({video,audio:false}); }
+  catch(e){ if(!deviceId) throw e; store.set("etq_cam",""); return iniciarStream(null); }
+  const tr=camTrack(); const cap=tr.getCapabilities?tr.getCapabilities():{};
+  // Enfoque continuo donde el teléfono lo permite (Android); en iPhone ya viene así.
+  try{ if(cap.focusMode&&cap.focusMode.includes("continuous")) await tr.applyConstraints({advanced:[{focusMode:"continuous"}]}); }catch(e){}
+  const v=$("#video"); v.srcObject=camStream; try{ await v.play(); }catch(e){}
+}
+async function abrirCamara(modo){
+  camModo=modo; $("#cam").hidden=false; $("#cam").classList.remove("ok");
+  try{ if(!audio) audio=new (window.AudioContext||window.webkitAudioContext)(); if(audio.state==="suspended") audio.resume(); }catch(e){ audio=null; }
+  $("#cam-ultimo").hidden=true; $("#cam-deshacer").hidden=false; ultimaSuma=null; $("#cam-nota").hidden=modo!=="cajas";
+  $("#cam-estado").textContent="Abriendo cámara…"; if(modo==="cajas") camTotal(); else $("#cam-tot").textContent="Apunta al código de barras de la etiqueta";
+  try{ await iniciarStream(store.get("etq_cam")||null); }
+  catch(e){ $("#cam-estado").textContent="No pude abrir la cámara. Dale permiso de cámara a esta página en el navegador."; return; }
+  camActiva=true; ultimoCodigo=null; pausaHasta=0; candCodigo=null; candVeces=0;
+  $("#cam-estado").textContent= modo==="cajas"?"Apunta al código de barras de la caja":"Apunta al código de la etiqueta del pallet";
+  let det=null;
+  if("BarcodeDetector" in window){ try{ const sop=await BarcodeDetector.getSupportedFormats(); const f=["ean_13","ean_8","upc_a","upc_e","itf","code_128","code_39"].filter(x=>sop.includes(x)); if(f.length) det=new BarcodeDetector({formats:f}); }catch(e){} }
+  if(det) loopNativo(det);
+  loopWasm(!!det);
+}
+function cerrarCamara(){
+  camActiva=false; if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  $("#video").srcObject=null; $("#cam").hidden=true;
+}
+$("#cam-cajas").onclick=()=>abrirCamara("cajas");
+$("#cam-log").onclick=()=>abrirCamara("log");
+$("#cam-close").onclick=cerrarCamara;
+
+/* ---------- foto (para códigos pequeños o cuando la cámara en vivo no lee) ---------- */
+// La cámara del teléfono enfoca mejor de cerca que el video en vivo; la foto se lee a resolución completa.
+async function decodeImage(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=url; });
+    if("BarcodeDetector" in window){ try{ const r=await new BarcodeDetector().detect(img); if(r&&r.length) return r[0].rawValue; }catch(e){} }
+    await prepararLector();
+    const iw=img.naturalWidth, ih=img.naturalHeight;
+    for(const maxSide of [2600,1400]){
+      const sc=Math.min(1,maxSide/Math.max(iw,ih)); const cv=document.createElement("canvas");
+      cv.width=Math.round(iw*sc); cv.height=Math.round(ih*sc);
+      const c=cv.getContext("2d",{willReadFrequently:true}); c.drawImage(img,0,0,cv.width,cv.height);
+      const t=await leerImagen(c.getImageData(0,0,cv.width,cv.height)); if(t) return t;
+    }
+    return null;
+  } finally { URL.revokeObjectURL(url); }
+}
+let fotoModo="cajas";
+$("#cam-foto").onclick=()=>{ fotoModo=camModo; cerrarCamara(); $("#camfile").value=""; $("#camfile").click(); };
+$("#camfile").addEventListener("change",async e=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  const msg= fotoModo==="cajas"?$("#scanmsg"):$("#qmsg"); setScanMsg(msg,"Leyendo el código de la foto…");
+  let code=null; try{ code=await decodeImage(f); }catch(err){}
+  if(!code){ setScanMsg(msg,"No pude leer el código en la foto. Tómala de cerca, con buena luz, sin reflejo y con el código derecho.","warn"); return; }
+  if(fotoModo==="cajas") handleScan(code); else { $("#q").value=code; findPallet(code); }
+});
+
+/* ---------- generar ---------- */
+function showMsg(el,text,ok){ el.hidden=false; el.textContent=text; el.className="msg"+(ok?" ok":""); }
+$("#gen").onclick=async()=>{
+  const m=$("#genmsg");
+  const buenas=state.lines.filter(l=>(parseFloat(l.qty)||0)>0 && l.desc.trim());
+  const item=l=>({producto:l.desc.trim(), sku:l.sku||"", cajas:parseFloat(l.qty)});
+  if(!state.prov){ showMsg(m,"Falta el proveedor. Toca uno de la lista o escríbelo."); return; }
+  if(!state.recv){ showMsg(m,"Falta quién recibió. Toca un nombre en \"Recibido por\"."); $("#recv").scrollIntoView({block:"center"}); return; }
+  if(!buenas.length){ showMsg(m,"Falta lo que trae el pallet. Escanea las cajas o escribe el producto y las cajas."); return; }
+  // Un grupo por número de pallet, en orden: #1, #2, #5 salen como pallet 1, 2 y 3 de 3.
+  const nums=[...new Set(buenas.map(l=>l.pal||1))].sort((a,b)=>a-b);
+  const grupos=nums.map(n=>buenas.filter(l=>(l.pal||1)===n).map(item));
+  const copias=Math.min(40,Math.max(1,parseInt($("#copies").value,10)||1));
+  if(grupos.length>40){ showMsg(m,"Son más de 40 pallets: genera las etiquetas en dos partes."); return; }
+  $("#gen").disabled=true; showMsg(m,"Guardando…",true);
+  try{
+    const base={proveedor:state.prov, po:$("#po").value.trim(), ubicacion:$("#loc").value.trim(), recibido_por:state.recv};
+    let j;
+    if(grupos.length===1) j=await api("crear",{pallet:Object.assign({items:grupos[0]},base), copias});
+    else {
+      try{ j=await api("crearLote",Object.assign({pallets:grupos.map(items=>({items}))},base)); }
+      catch(e){ if(/Acci[oó]n desconocida/.test(e.message)) throw new Error("para guardar varios pallets distintos hay que actualizar el Apps Script (Implementar > Gestionar implementaciones > editar > Nueva versión)."); throw e; }
+    }
+    // Con el Apps Script viejo el nombre no vuelve: la etiqueta lo lleva igual.
+    j.pallets.forEach(p=>{ if(!p.recibido_por) p.recibido_por=state.recv; });
+    state.pallets=[...j.pallets.slice().reverse(),...state.pallets];
+    const ids=j.pallets.map(p=>p.id);
+    showMsg(m, ids.length>1?`Listo: ${ids[0]} a ${ids[ids.length-1]} guardados en el registro.`:`Listo: ${ids[0]} quedó guardado en el registro.`, true);
+    openLabels(j.pallets);
+    state.pal=1; state.lines=[lineaNueva()]; renderLines(); updTotal(); $("#po").value=""; $("#loc").value=""; $("#copies").value="1"; setScanMsg($("#scanmsg"),"");
+    renderChips();
+  }catch(e){ showMsg(m,"No se guardó: "+e.message); }
+  finally{ $("#gen").disabled=false; }
+};
+
+/* ---------- etiqueta (canvas 4x6 a 203 dpi) ---------- */
+const W=812,H=1218;
+function fitText(ctx,text,maxW,size,weight,family){ let s=size; do{ ctx.font=`${weight} ${s}px ${family}`; if(ctx.measureText(text).width<=maxW) break; s-=2; }while(s>14); return s; }
+function wrapLines(ctx,text,maxW){ const words=String(text).split(/\s+/); const out=[]; let cur=""; for(const w of words){ const t=cur?cur+" "+w:w; if(ctx.measureText(t).width>maxW && cur){ out.push(cur); cur=w; } else cur=t; } if(cur) out.push(cur); return out; }
+function fmtDate(f){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(f||"")); return m?`${m[2]}/${m[3]}/${m[1].slice(2)}`:String(f||""); }
+function fmtNum(n){ return Number(n||0).toLocaleString("en-US",{maximumFractionDigits:1}); }
+function drawLabel(cv,p){
+  const ctx=cv.getContext("2d"); const F='"Barlow Condensed","Arial Narrow",Arial,sans-serif';
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,W,H); ctx.fillStyle="#000"; ctx.strokeStyle="#000"; ctx.textBaseline="alphabetic"; ctx.textAlign="left";
+  const M=24; const box=(x,y,w,h,lw=4)=>{ ctx.lineWidth=lw; ctx.strokeRect(x,y,w,h); };
+  const lab=(t,x,y)=>{ ctx.font=`600 26px ${F}`; ctx.fillText(t,x,y); };
+  const n=p.pallet_n||1, lote=p.pallets_lote||1;
+  // fila 1: recibido / pallet n de N
+  box(M,M,W-2*M,110);
+  lab("RECIBIDO"+(p.recibido_por?` POR ${String(p.recibido_por).toUpperCase()}`:""),M+16,M+34); ctx.font=`700 54px ${F}`; ctx.fillText(fmtDate(p.fecha),M+16,M+92);
+  ctx.textAlign="right";
+  if(lote>1){ lab("PALLET",W-M-16,M+34); ctx.font=`800 54px ${F}`; ctx.fillText(`${n} DE ${lote}`,W-M-16,M+92); }
+  else { lab("CONVENIENT DISTRIBUTOR",W-M-16,M+34); ctx.font=`600 26px ${F}`; ctx.fillText("Medley, FL",W-M-16,M+70); }
+  ctx.textAlign="left";
+  // fila 2: proveedor
+  let y=M+110; box(M,y,W-2*M,150);
+  lab("PROVEEDOR",M+16,y+34);
+  const prov=String(p.proveedor||"").toUpperCase(); fitText(ctx,prov,W-2*M-32,92,800,F); ctx.fillText(prov,M+16,y+128);
+  // fila 3: PO / ubicación
+  y+=150; const half=(W-2*M)/2; box(M,y,half,96); box(M+half,y,half,96);
+  lab("PO / FACTURA #",M+16,y+32); fitText(ctx,p.po||"—",half-32,48,700,F); ctx.fillText(p.po||"—",M+16,y+82);
+  lab("UBICACIÓN",M+half+16,y+32); fitText(ctx,p.ubicacion||"—",half-32,48,800,F); ctx.fillText(p.ubicacion||"—",M+half+16,y+82);
+  // fila 4: ID + código de barras
+  y+=96; box(M,y,W-2*M,230);
+  lab("ID DEL PALLET",M+16,y+34);
+  const bc=document.createElement("canvas");
+  try{ JsBarcode(bc,p.id,{format:"CODE128",displayValue:false,margin:0,height:116,width:4}); }catch(e){}
+  const bw=Math.min(bc.width||0,W-2*M-40); if(bw) ctx.drawImage(bc,(W-bw)/2,y+46,bw,116);
+  ctx.textAlign="center"; ctx.font=`800 58px ${F}`; ctx.fillText(p.id,W/2,y+214); ctx.textAlign="left";
+  // contenido: el encabezado lleva el número de pallet, las cajas de abajo son las de ESTE pallet
+  y+=230; const footH=86; const cH=H-M-footH-y; box(M,y,W-2*M,cH);
+  const tit=`CONTENIDO DEL PALLET #${n}`+(lote>1?` DE ${lote}`:"");
+  ctx.fillRect(M,y,W-2*M,56); ctx.fillStyle="#fff"; fitText(ctx,tit,W-2*M-32,40,800,F); ctx.fillText(tit,M+16,y+42);
+  ctx.fillStyle="#000"; ctx.font=`700 26px ${F}`; ctx.fillText("CAJAS",M+16,y+88); ctx.fillText("PRODUCTO",M+150,y+88);
+  ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(M+8,y+100); ctx.lineTo(W-M-8,y+100); ctx.stroke();
+  const rows=[]; let fs=34;
+  for(;fs>=22;fs-=2){ ctx.font=`600 ${fs}px ${F}`; rows.length=0; for(const it of (p.items||[])){ rows.push({q:it.cajas, lines:wrapLines(ctx,String(it.producto).toUpperCase(),W-2*M-170)}); } const need=rows.reduce((a,r)=>a+r.lines.length*(fs+6)+8,0); if(need<=cH-110) break; }
+  let ry=y+100+fs+10;
+  for(const r of rows){ if(ry>y+cH-6) break; ctx.font=`800 ${fs+4}px ${F}`; ctx.fillText(fmtNum(r.q),M+16,ry); ctx.font=`600 ${fs}px ${F}`;
+    r.lines.forEach((t,i)=>{ if(ry+i*(fs+6)<=y+cH-6) ctx.fillText(t,M+150,ry+i*(fs+6)); }); ry+=r.lines.length*(fs+6)+8;
+    ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(M+8,ry-fs+2); ctx.lineTo(W-M-8,ry-fs+2); ctx.stroke(); }
+  // pie
+  y=H-M-footH; box(M,y,W-2*M,footH);
+  lab(`TOTAL CAJAS DEL PALLET #${n}`,M+16,y+52); ctx.textAlign="right"; ctx.font=`800 64px ${F}`; ctx.fillText(fmtNum(p.total_cajas),W-M-16,y+66); ctx.textAlign="left";
+  if(p.anulado){ ctx.save(); ctx.translate(W/2,H/2); ctx.rotate(-0.5); ctx.font=`800 150px ${F}`; ctx.textAlign="center"; ctx.fillStyle="rgba(200,0,0,.75)"; ctx.fillText("ANULADO",0,0); ctx.restore(); }
+}
+async function openLabels(list,desde,aviso){
+  try{ await document.fonts.load('800 50px "Barlow Condensed"'); await document.fonts.load('600 26px "Barlow Condensed"'); }catch(e){}
+  state.current=list; state.page=Math.max(0,Math.min(list.length-1,desde||0)); $("#out").hidden=false; $("#outmsg").hidden=true;
+  $("#outtitle").textContent = list.length>1 ? `${list.length} etiquetas · ${list[0].id} a ${list[list.length-1].id}` : `Etiqueta ${list[0].id}`;
+  $("#lotemsg").hidden=!aviso; $("#lotemsg").textContent=aviso||"";
+  $("#pagenav").hidden = list.length<2; drawThumbs(); drawPage(); renderVoid();
+  $("#out").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
+}
+function drawPage(){ drawLabel($("#cv"),state.current[state.page]); $("#pageinfo").textContent=`${state.page+1} / ${state.current.length}`;
+  $("#thumbs").querySelectorAll("button").forEach((b,i)=>b.setAttribute("aria-current",String(i===state.page))); }
+// Vista previa de todas las etiquetas del lote: tocar una la abre en grande.
+function drawThumbs(){ const box=$("#thumbs"); box.textContent=""; const list=state.current; box.hidden=list.length<2; if(list.length<2) return;
+  const cv=document.createElement("canvas"); cv.width=W; cv.height=H; const sm=document.createElement("canvas"); sm.width=144; sm.height=216;
+  list.forEach((p,i)=>{ drawLabel(cv,p); sm.getContext("2d").drawImage(cv,0,0,144,216);
+    const b=document.createElement("button"); b.setAttribute("aria-label",`Etiqueta ${i+1}: ${p.id}`); const im=new Image(); im.src=sm.toDataURL("image/png"); im.alt="";
+    const t=document.createElement("span"); t.textContent=`${p.pallet_n||i+1} de ${p.pallets_lote||list.length}`; b.append(im,t);
+    b.onclick=()=>{ state.page=i; drawPage(); renderVoid(); }; box.appendChild(b); }); }
+$("#prev").onclick=()=>{ if(state.page>0){ state.page--; drawPage(); renderVoid(); } };
+$("#next").onclick=()=>{ if(state.page<state.current.length-1){ state.page++; drawPage(); renderVoid(); } };
+function setPaper(p){ state.paper=p; $("#p46").setAttribute("aria-pressed",String(p==="4x6")); $("#pletter").setAttribute("aria-pressed",String(p==="letter")); }
+$("#p46").onclick=()=>setPaper("4x6"); $("#pletter").onclick=()=>setPaper("letter");
+function imagenes(){ const cv=document.createElement("canvas"); cv.width=W; cv.height=H; return state.current.map(p=>{ drawLabel(cv,p); return cv.toDataURL("image/png"); }); }
+$("#print-btn").onclick=()=>{
+  const four=state.paper==="4x6"; const box=$("#print"); box.textContent="";
+  let st=document.getElementById("pagestyle"); if(!st){ st=document.createElement("style"); st.id="pagestyle"; document.head.appendChild(st); }
+  st.textContent= four ? "@page{size:4in 6in;margin:0} #print img{width:4in;height:6in}" : "@page{size:letter;margin:0.4in} #print img{height:9.6in;width:6.4in}";
+  imagenes().forEach(src=>{ const im=new Image(); im.src=src; box.appendChild(im); });
+  setTimeout(()=>window.print(),150);
+};
+$("#pdf-btn").onclick=()=>{
+  const {jsPDF}=window.jspdf; const four=state.paper==="4x6";
+  const pdf= four? new jsPDF({unit:"in",format:[4,6],orientation:"portrait"}) : new jsPDF({unit:"in",format:"letter",orientation:"portrait"});
+  imagenes().forEach((img,i)=>{ if(i) pdf.addPage(); if(four) pdf.addImage(img,"PNG",0,0,4,6); else { const h=10.2, w=h*4/6; pdf.addImage(img,"PNG",(8.5-w)/2,0.4,w,h); } });
+  const c=state.current; pdf.save(c.length>1?`Etiquetas_${c[0].id}_a_${c[c.length-1].id}.pdf`:`Etiqueta_${c[0].id}.pdf`);
+};
+
+/* ---------- anular ---------- */
+function renderVoid(){
+  const box=$("#voidbox"); box.textContent=""; const p=state.current[state.page];
+  if(!p||p.anulado) return;
+  const b=document.createElement("button"); b.className="ghost"; b.textContent="Anular esta etiqueta"; box.appendChild(b);
+  b.onclick=()=>{ box.textContent=""; const s=document.createElement("span"); s.className="muted"; s.textContent=`¿Anular ${p.id}? El ID no se vuelve a usar.`;
+    const y=document.createElement("button"); y.className="ghost"; y.textContent="Sí, anular"; const n=document.createElement("button"); n.className="ghost"; n.textContent="No";
+    n.onclick=renderVoid; y.onclick=async()=>{ y.disabled=true; try{ await api("anular",{id:p.id}); p.anulado=true; const r=state.pallets.find(x=>x.id===p.id); if(r) r.anulado=true; drawPage(); renderVoid(); renderLog(); }catch(e){ s.textContent="No se pudo anular: "+e.message; y.disabled=false; } };
+    box.append(s,y,n); };
+}
+
+/* ---------- registro ---------- */
+function renderLog(){
+  const q=norm($("#q").value||""); const box=$("#log"); box.textContent="";
+  const list=state.pallets.filter(p=>!q||norm([p.id,p.proveedor,p.po,p.ubicacion,...(p.items||[]).map(i=>i.producto)].join(" ")).includes(q));
+  if(!list.length){ const e=document.createElement("p"); e.className="muted"; e.textContent=state.pallets.length?"Nada coincide con la búsqueda.":"Todavía no hay pallets. Genera la primera etiqueta en la pestaña Nueva."; box.appendChild(e); return; }
+  for(const p of list.slice(0,200)){
+    const b=document.createElement("button"); b.className="item"+(p.anulado?" void":"");
+    const id=document.createElement("span"); id.className="id"; id.textContent=p.id;
+    const cj=document.createElement("span"); cj.className="cj"; cj.textContent=`${fmtNum(p.total_cajas)} cj`;
+    const pv=document.createElement("span"); pv.className="prov"; pv.textContent=p.proveedor+(p.pallets_lote>1?` · pallet ${p.pallet_n} de ${p.pallets_lote}`:"")+(p.po?` · PO ${p.po}`:"");
+    const mt=document.createElement("span"); mt.className="meta"; mt.textContent=`${fmtDate(p.fecha)}${p.recibido_por?` · recibió ${p.recibido_por}`:""} · ${(p.items||[]).map(i=>`${fmtNum(i.cajas)} ${i.producto}`).join(", ")}${p.anulado?" · ANULADO":""}`;
+    b.append(id,cj,pv,mt); b.onclick=()=>abrirConLote(p); box.appendChild(b);
+  }
+}
+$("#q").addEventListener("input",()=>{ $("#qmsg").textContent=""; renderLog(); });
+$("#q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); findPallet(e.target.value); } });
+// Las etiquetas que se guardaron juntas tienen IDs seguidos del mismo día: de ahí salen las demás del lote.
+function loteDe(p){ const N=Number(p.pallets_lote)||1, n=Number(p.pallet_n)||1, m=/^CD-(\d{6})-(\d+)$/.exec(p.id||"");
+  if(N<2||!m) return [p]; const base=parseInt(m[2],10)-(n-1), out=[];
+  for(let k=0;k<N;k++){ const id=`CD-${m[1]}-${String(base+k).padStart(2,"0")}`; const x=state.pallets.find(y=>y.id===id);
+    if(x&&x.proveedor===p.proveedor&&Number(x.pallets_lote)===N) out.push(x); }
+  return out.length?out:[p]; }
+function abrirConLote(p){ const lote=loteDe(p), N=Number(p.pallets_lote)||1;
+  let aviso=""; if(N>1) aviso=`Este es el pallet ${p.pallet_n} de ${N}. Son estas ${N} etiquetas`+(lote.length<N?` (encontré ${lote.length})`:"")+".";
+  return openLabels(lote,lote.indexOf(p),aviso); }
+async function findPallet(v){ v=String(v||"").trim().toUpperCase(); if(!v) return;
+  let p=state.pallets.find(x=>x.id===v);
+  // Si no está en lo que ya bajó el teléfono (otra persona la hizo, o el registro aún no carga), se vuelve a pedir.
+  if(!p&&/^CD-/.test(v)){ setScanMsg($("#qmsg"),`Buscando ${v}…`,"");
+    try{ const j=await api("pallets"); state.pallets=j.pallets||[]; }catch(e){ setScanMsg($("#qmsg"),"No pude leer el registro: "+e.message,"warn"); return; }
+    p=state.pallets.find(x=>x.id===v); }
+  if(p){ setScanMsg($("#qmsg"),"",""); renderLog(); await abrirConLote(p); }
+  else if(/^CD-/.test(v)){ setScanMsg($("#qmsg"),`No encontré el pallet ${v} en el registro.`,"warn"); renderLog(); } else renderLog(); }
+function openById(id){ showTab("log"); $("#q").value=id; renderLog(); findPallet(id); }
+function showTab(t){ $("#tab-new").setAttribute("aria-selected",String(t==="new")); $("#tab-log").setAttribute("aria-selected",String(t==="log"));
+  $("#view-new").hidden=t!=="new"; $("#view-new").style.display=t==="new"?"flex":"none"; $("#view-log").hidden=t!=="log"; $("#view-log").style.display=t==="log"?"flex":"none";
+  $("#out").hidden=true;
+  if(t==="log"){ renderLog(); api("pallets").then(j=>{ state.pallets=j.pallets||[]; renderLog(); }).catch(()=>{}); } }
+$("#tab-new").onclick=()=>showTab("new"); $("#tab-log").onclick=()=>showTab("log");
+
+/* ---------- arranque ---------- */
+// Un link con #api=...&clave=... deja configurado el teléfono de una vez (y se borra de la barra).
+function leerHash(){ const h=new URLSearchParams(location.hash.slice(1));
+  if(h.get("api")){ cfg.api=h.get("api"); }
+  if(h.get("clave")){ cfg.clave=h.get("clave"); store.set("etq_clave",cfg.clave); }
+  const habia=!!(h.get("api")||h.get("clave")); if(habia) history.replaceState(null,"",location.pathname+location.search); return habia; }
+function iniciar(){ if(cfg.api && cfg.clave) arrancar(); else { $("#cfg-api").value=cfg.api; mostrar("setup"); $("#conn").textContent="Sin configurar"; } }
+window.addEventListener("hashchange",()=>{ if(leerHash()) iniciar(); });
+leerHash(); renderChips(); renderLines(); updTotal(); iniciar();
+</script>
+</body>
+</html>
